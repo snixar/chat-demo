@@ -696,7 +696,7 @@ const nativeFetchStream = (bridge: NativeMcpBridge, url: string, init: RequestIn
  * 统一出口。Android 壳里走原生 HTTP（绕过 CORS 与明文限制），浏览器里直接用 fetch。
  * streaming 为 true 时用流式模式：SSE 是长连接，必须边读边处理。
  */
-async function mcpFetch(url: string, init: RequestInit, streaming = false): Promise<Response> {
+export async function mcpFetch(url: string, init: RequestInit, streaming = false): Promise<Response> {
   const bridge = typeof window === 'undefined' ? undefined : window.AndroidMcp
   if (!bridge?.request) {
     try {

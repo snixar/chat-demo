@@ -140,13 +140,17 @@ const hasFile = (body: CreateMessageRequest) =>
 /**
  * POST /anthropic/v1/messages（stream: true），逐个产出流式事件，收到 message_stop 时结束。
  * ping、保活注释与无法解析的内容不产出；中止请求时抛出 signal 的 AbortError。
+ *
+ * baseUrl 只给自定义的 Anthropic 兼容提供商使用；官方路径不传，仍走 API_ORIGIN，
+ * 行为与之前完全一致。
  */
 export async function* streamMessage(
   apiKey: string,
   body: CreateMessageRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  baseUrl: string = ANTHROPIC_BASE_URL
 ): AsyncGenerator<MessageStreamEvent> {
-  const response = await request(`${ANTHROPIC_BASE_URL}/messages`, {
+  const response = await request(`${baseUrl}/messages`, {
     method: 'POST',
     headers: {
       ...anthropicHeaders(apiKey, hasFile(body)),

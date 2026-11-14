@@ -6,6 +6,7 @@ import { useMcp } from '../../services/mcp/store.js'
 import { useChatStore } from '../../services/chat/store.js'
 import { resolveServerIds, useNewChatMcp } from './newChatMcp.js'
 import { McpServerPicker } from './McpServerPicker.js'
+import { ModelPicker, useCurrentModelLabel } from './ModelPicker.js'
 import styles from './AttachmentSheet.module.css'
 
 /**
@@ -29,12 +30,35 @@ export const AttachmentSheet = ({
   sessionId: string | null
 }) => {
   const t = useTranslate()
-  const [page, setPage] = useState<'main' | 'mcp'>('main')
+  const [page, setPage] = useState<'main' | 'model' | 'mcp'>('main')
 
   // 关闭时回到主页面，否则下次打开会停在上次的子页面
   const close = () => {
     setPage('main')
     onClose()
+  }
+
+  if (page === 'model') {
+    return (
+      <BottomSheet
+        open={open}
+        title={t('modelPickerTitle')}
+        onClose={close}
+        padded
+        headerAction={
+          <button
+            type="button"
+            className={styles.backButton}
+            aria-label={t('back')}
+            onClick={() => setPage('main')}
+          >
+            <ArrowLeftIcon />
+          </button>
+        }
+      >
+        <ModelPicker onPicked={close} />
+      </BottomSheet>
+    )
   }
 
   if (page === 'mcp') {
@@ -76,8 +100,27 @@ export const AttachmentSheet = ({
           <span className={styles.label}>{t('attachFile')}</span>
         </button>
       </div>
+      <ModelEntryRow onClick={() => setPage('model')} />
       <McpEntryRow sessionId={sessionId} onClick={() => setPage('mcp')} />
     </BottomSheet>
+  )
+}
+
+/** 主面板的模型入口：图标 + 名称 + 当前模型名 + 箭头 */
+const ModelEntryRow = ({ onClick }: { onClick: () => void }) => {
+  const t = useTranslate()
+  const label = useCurrentModelLabel()
+  return (
+    <button type="button" className={styles.entry} onClick={onClick}>
+      <span className={styles.entryIcon}>
+        <ModelIcon />
+      </span>
+      <span className={styles.entryLabel}>{t('modelPickerTitle')}</span>
+      <span className={styles.entryValue}>{label}</span>
+      <span className={styles.entryChevron}>
+        <ChevronIcon />
+      </span>
+    </button>
   )
 }
 
@@ -145,6 +188,18 @@ export const McpIcon = () => (
     <rect x="3" y="12" width="16" height="6" rx="2" stroke="currentColor" strokeWidth="1.5" />
     <circle cx="6.5" cy="7" r="0.9" fill="currentColor" />
     <circle cx="6.5" cy="15" r="0.9" fill="currentColor" />
+  </svg>
+)
+
+const ModelIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden>
+    <path
+      d="M11 3l7.5 4.2v7.6L11 19l-7.5-4.2V7.2z"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <path d="M11 11l7.5-4.2M11 11v8M11 11L3.5 6.8" stroke="currentColor" strokeWidth="1.3" />
   </svg>
 )
 

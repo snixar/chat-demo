@@ -7,7 +7,18 @@ import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from 
 import { useSettings } from '../settings.js'
 import { useMcp } from '../mcp/store.js'
 import { resetNewChatMcp, useNewChatMcp } from '../../components/chatInput/newChatMcp.js'
-import { callTool, loadAllTools, toCustomTools } from '../mcp/tools.js'
+import {
+  callTool,
+  clearLocalTools,
+  loadAllTools,
+  localToolsDeclaration,
+  registerLocalTools,
+  toCustomTools,
+} from '../mcp/tools.js'
+import { streamOpenAIMessage, buildOpenAIRequest } from '../api/openai.js'
+import { FETCH_TOOL_NAME, SEARCH_TOOL_NAME, fetchUrl, searchWeb } from '../api/deepseekTools.js'
+import { resolveModelTarget } from '../providers/store.js'
+import { CUSTOM_REASONING_EFFORT } from '../providers/types.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -918,6 +929,65 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
   }
 }
 
+/**
+ * 注册客户端搜索/抓取工具。search 为 false 时只注册抓取（与官方模型一致，
+ * 官方那边 read_url 也是始终声明的）。
+ */
+const registerLocalSearchTools = (search: boolean) => {
+  const key = () => useSettings.getState().apiKey ?? ''
+  const tools: {
+    name: string
+    description: string
+    inputSchema: { type: 'object'; properties: Record<string, unknown>; required: string[] }
+    run: (input: unknown, signal: AbortSignal) => Promise<string>
+  }[] = [
+    {
+      name: FETCH_TOOL_NAME,
+      description:
+        'Fetch and read the full text of a web page. Use when the user gives a URL or a search result needs details.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          url: { type: 'string', description: 'Absolute http(s) URL to read' },
+        },
+        required: ['url'],
+      },
+      run: (input: unknown, signal: AbortSignal) => {
+        const url =
+          typeof input === 'object' && input !== null ? (input as { url?: unknown }).url : undefined
+        if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+          throw new Error('A valid http(s) url is required')
+        }
+        return fetchUrl(key(), url, signal)
+      },
+    },
+  ]
+  if (search) {
+    tools.push({
+      name: SEARCH_TOOL_NAME,
+      description: 'Search the web for current information. Returns titles, URLs and snippets.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          query: { type: 'string', description: 'Search query' },
+        },
+        required: ['query'],
+      },
+      run: (input: unknown, signal: AbortSignal) => {
+        const query =
+          typeof input === 'object' && input !== null
+            ? (input as { query?: unknown }).query
+            : undefined
+        if (typeof query !== 'string' || !query.trim()) {
+          throw new Error('A non-empty query is required')
+        }
+        return searchWeb(key(), query, signal)
+      },
+    })
+  }
+  registerLocalTools(tools)
+}
+
 /** 本次请求实际会用到的服务端 file_id */
 const collectServerFileIds = (request: Request): Set<string> => {
   const ids = new Set<string>()
@@ -1051,12 +1121,25 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     updateReply(sessionId, reply)
     persist(sessionId)
 
+    // 当前选中的模型决定协议与工具策略
+    const target = resolveModelTarget()
+    // 自定义模型没有服务端的搜索/抓取工具，改由客户端调 DeepSeek 的独立搜索 API
+    const usesCustomSearch = target.kind === 'custom'
+    if (usesCustomSearch) {
+      registerLocalSearchTools(target.kind === 'custom' ? (initial.search ?? false) : false)
+    } else {
+      clearLocalTools()
+    }
+
     {
       // 会话级开关：mcpServerIds 为 undefined 时用全部已启用的服务器
       const sessionServers = getSession(sessionId)?.mcpServerIds
       const { tools } = await loadAllTools(sessionServers)
-      toolList = toCustomTools(tools)
+      // 自定义模型可选择不声明工具（部分端点不支持）；官方模型保持原样
+      const mcpTools = target.kind === 'custom' && !target.model.supportsTools ? [] : tools
+      toolList = toCustomTools(mcpTools)
     }
+    const localTools = localToolsDeclaration()
     controller.signal.throwIfAborted()
 
     for (let turn = 0; ; turn += 1) {
@@ -1073,19 +1156,14 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       for (let attempt = 0; ; attempt += 1) {
         let receivedContent = false
         try {
-          const events = streamMessage(
-            useSettings.getState().apiKey ?? '',
-            {
-              model: initial.model ?? MODEL,
-              system: SYSTEM_PROMPT,
-              messages: [...baseMessages, ...toolTranscript],
-              thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
-              safety_check: SAFETY_CHECK,
-              tools: [...serverTools(initial.search ?? false), ...toolList],
-              ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
-            },
-            controller.signal
-          )
+          const events = buildRequestEvents({
+            target,
+            initial,
+            messages: [...baseMessages, ...toolTranscript],
+            toolList,
+            localTools,
+            controller,
+          })
           const blockIndexes = new Map<number, number>()
           for await (const event of events) {
             receivedContent ||= event.type === 'content_block_start'
@@ -1207,6 +1285,87 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     }))
     persist(sessionId)
   }
+}
+
+/** streamReply 的请求参数 */
+type RequestEventsArgs = {
+  target: ReturnType<typeof resolveModelTarget>
+  initial: AssistantMessage
+  messages: MessageParam[]
+  toolList: ReturnType<typeof toCustomTools>
+  localTools: ReturnType<typeof localToolsDeclaration>
+  controller: AbortController
+}
+
+/**
+ * 按当前选中的模型构造请求并返回事件流。
+ *
+ * 官方 DeepSeek 分支的请求体保持改造前的原样：内置工具 + 安全审核 + 标题，
+ * 不带自定义提供商任何字段。自定义提供商分 Anthropic 兼容与 OpenAI 兼容两条路径，
+ * 都不发 DeepSeek 专有的 safety_check / title 扩展。
+ */
+function buildRequestEvents({
+  target,
+  initial,
+  messages,
+  toolList,
+  localTools,
+  controller,
+}: RequestEventsArgs) {
+  if (target.kind === 'official') {
+    // 与改造前完全一致的请求体
+    return streamMessage(
+      useSettings.getState().apiKey ?? '',
+      {
+        model: initial.model ?? MODEL,
+        system: SYSTEM_PROMPT,
+        messages,
+        thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
+        safety_check: SAFETY_CHECK,
+        tools: [...serverTools(initial.search ?? false), ...toolList],
+        ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
+      },
+      controller.signal
+    )
+  }
+
+  // 自定义模型：工具只用 MCP + 客户端搜索（supportsTools 关闭时连这些也不声明）
+  const tools = target.model.supportsTools ? [...toolList, ...localTools] : localTools
+  const base = {
+    model: target.model.modelId,
+    system: SYSTEM_PROMPT,
+    messages,
+    thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
+    tools,
+  } as const
+
+  if (target.provider.protocol === 'anthropic') {
+    // Anthropic 兼容：复用官方适配器，只换 baseUrl 与 key
+    return streamMessage(
+      target.provider.apiKey,
+      {
+        ...base,
+        thinking: base.thinking,
+        safety_check: SAFETY_CHECK,
+      } as unknown as CreateMessageRequest,
+      controller.signal,
+      target.provider.baseUrl
+    )
+  }
+
+  return streamOpenAIMessage(
+    target.provider.apiKey,
+    target.provider.baseUrl,
+    buildOpenAIRequest(
+      {
+        ...base,
+        safety_check: SAFETY_CHECK,
+      } as unknown as CreateMessageRequest,
+      target.model.modelId,
+      initial.thinking ? CUSTOM_REASONING_EFFORT : undefined
+    ),
+    controller.signal
+  )
 }
 
 /**

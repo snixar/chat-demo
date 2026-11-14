@@ -7,10 +7,13 @@ export type SettingsRoute =
   | { name: 'mcp' }
   | { name: 'apiKey' }
   | { name: 'data' }
+  | { name: 'providers' }
+  /** providerId 为 null 表示新建，保存后才真正落库 */
+  | { name: 'providerDetail'; providerId: string | null }
   | { name: 'mcpServer'; serverId: string }
 
-/** 可直达的二级页（不含 root 与需要参数的 mcpServer） */
-export type SettingsPageId = Exclude<SettingsRoute['name'], 'root' | 'mcpServer'>
+/** 可直达的二级页（不含 root 与需要参数的路由） */
+export type SettingsPageId = Exclude<SettingsRoute['name'], 'root' | 'mcpServer' | 'providerDetail'>
 
 /**
  * 设置页状态。栈放在 store 而不是组件里，因为原生返回键、侧边栏入口都要能控制它：
@@ -22,9 +25,18 @@ export const useSettingsDialog = create<{
   stack: SettingsRoute[]
 }>(() => ({ open: false, stack: [{ name: 'root' }] }))
 
-const isSameRoute = (a: SettingsRoute, b: SettingsRoute) =>
-  a.name === b.name &&
-  (a.name !== 'mcpServer' || a.serverId === (b as { serverId?: string }).serverId)
+const isSameRoute = (a: SettingsRoute, b: SettingsRoute) => {
+  if (a.name !== b.name) {
+    return false
+  }
+  if (a.name === 'mcpServer' && b.name === 'mcpServer') {
+    return a.serverId === b.serverId
+  }
+  if (a.name === 'providerDetail' && b.name === 'providerDetail') {
+    return a.providerId === b.providerId
+  }
+  return true
+}
 
 /** 打开设置；page 为 null 时停在列表页 */
 export const openSettings = (page: SettingsPageId | null = null) => {
@@ -34,6 +46,17 @@ export const openSettings = (page: SettingsPageId | null = null) => {
   }
   useSettingsDialog.setState({ open: true, stack })
 }
+
+/** 打开某台提供商的详情；传 null 表示新建 */
+export const openProviderDetail = (providerId: string | null) =>
+  useSettingsDialog.setState((state) => ({
+    open: true,
+    stack: [
+      ...state.stack.filter((route) => route.name === 'root'),
+      { name: 'providers' },
+      { name: 'providerDetail', providerId },
+    ],
+  }))
 
 /** 打开某个 MCP 服务器的详情 */
 export const openMcpServer = (serverId: string) =>

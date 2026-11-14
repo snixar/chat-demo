@@ -5,6 +5,7 @@ import { useSettings } from '../../services/settings.js'
 import { useMcp } from '../../services/mcp/store.js'
 import {
   openMcpServer,
+  openProviderDetail,
   popSettingsRoute,
   pushSettingsRoute,
   useSettingsDialog,
@@ -12,9 +13,12 @@ import {
 } from './settingsDialogState.js'
 import { DataPage, ApiKeyPage } from './SettingsPages.js'
 import { McpPage, McpServerPage } from './McpPage.js'
+import { ProvidersPage, ProviderDetailPage } from './ProvidersPage.js'
+import { useProviders } from '../../services/providers/store.js'
 import styles from './SettingsScreen.module.css'
 import { ChevronIcon, BackIcon, CloseIcon } from './settingsIcons.js'
 import { SettingPickerSheet, type SettingPicker } from './SettingPickers.js'
+import { useCurrentModelLabel } from '../chatInput/ModelPicker.js'
 
 /**
  * 设置页（全屏）。UI 对齐 DeepSeek 客户端：浅灰底、白色圆角卡片、分组灰标题。
@@ -25,7 +29,8 @@ const routeTitles = {
   apiKey: 'apiKeyLabel',
   data: 'settingsDataTitle',
   mcp: 'settingsMcpTitle',
-} satisfies Record<Exclude<SettingsRoute['name'], 'mcpServer'>, TranslationKey>
+  providers: 'providerListTitle',
+} satisfies Record<Exclude<SettingsRoute['name'], 'mcpServer' | 'providerDetail'>, TranslationKey>
 
 export const SettingsScreen = () => {
   const open = useSettingsDialog((state) => state.open)
@@ -34,17 +39,25 @@ export const SettingsScreen = () => {
   const t = useTranslate()
   // 服务器名可能在别处被改，订阅列表以便标题同步
   const servers = useMcp((state) => state.servers)
+  // 所有 hook 必须在 return 之前调用，否则开关设置页时 hook 数量变化会导致 React 崩溃
+  const providers = useProviders((state) => state.providers)
 
   if (!open) {
     return null
   }
 
-  const serverName =
+  const target =
     route.name === 'mcpServer'
       ? servers.find((item) => item.id === route.serverId)?.name
-      : undefined
+      : route.name === 'providerDetail'
+        ? providers.find((item) => item.id === route.providerId)?.name
+        : undefined
   const title =
-    route.name === 'mcpServer' ? serverName || t('settingsMcpTitle') : t(routeTitles[route.name])
+    route.name === 'mcpServer'
+      ? target || t('settingsMcpTitle')
+      : route.name === 'providerDetail'
+        ? target || t('providerListTitle')
+        : t(routeTitles[route.name])
 
   return (
     <div className={styles.page} role="dialog" aria-modal="true" aria-label={title}>
@@ -64,6 +77,10 @@ export const SettingsScreen = () => {
         {route.name === 'apiKey' ? <ApiKeyPage /> : null}
         {route.name === 'data' ? <DataPage /> : null}
         {route.name === 'mcp' ? <McpPage onOpenServer={openMcpServer} /> : null}
+        {route.name === 'providers' ? <ProvidersPage onOpen={openProviderDetail} /> : null}
+        {route.name === 'providerDetail' ? (
+          <ProviderDetailPage providerId={route.providerId} onDone={popSettingsRoute} />
+        ) : null}
         {route.name === 'mcpServer' ? (
           <McpServerPage serverId={route.serverId} onDone={popSettingsRoute} />
         ) : null}
@@ -82,6 +99,7 @@ const RootPage = () => {
   const apiKey = useSettings((state) => state.apiKey)
   const servers = useMcp((state) => state.servers)
   const [picker, setPicker] = useState<SettingPicker | null>(null)
+  const modelLabel = useCurrentModelLabel()
 
   const themeLabel = t(
     themePreference === 'light'
@@ -136,6 +154,13 @@ const RootPage = () => {
           description={t('settingsApiKeyHint')}
           value={apiKey ? '••••••••' : t('apiKeyNotSet')}
           onClick={() => pushSettingsRoute({ name: 'apiKey' })}
+        />
+        <Row
+          icon={<ModelIcon />}
+          label={t('modelPickerTitle')}
+          description={t('providerListTitle')}
+          value={modelLabel}
+          onClick={() => pushSettingsRoute({ name: 'providers' })}
         />
         <Row
           icon={<DatabaseIcon />}
@@ -283,6 +308,18 @@ const DatabaseIcon = () =>
       <path d="M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" {...stroke} />
     </>
   )
+
+const ModelIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+    <path
+      d="M10 2.8l6.4 3.6v6.4L10 16.4 3.6 12.8V6.4z"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+    <path d="M10 10l6.4-3.6M10 10v6.4M10 10L3.6 6.4" stroke="currentColor" strokeWidth="1.2" />
+  </svg>
+)
 
 const PlugIcon = () =>
   ico(

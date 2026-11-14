@@ -149,11 +149,46 @@ const findServerForTool = (qualifiedName: string) => {
   return { serverId: parsed.serverId, tool }
 }
 
+/* ---------- 本地工具（内置能力，不经 MCP 服务器） ---------- */
+
+/** 本地工具：由应用自己实现，例如调 DeepSeek 的搜索 API */
+type LocalTool = {
+  name: string
+  description: string
+  inputSchema: CustomTool['input_schema']
+  run: (input: unknown, signal: AbortSignal) => Promise<string>
+}
+
+const localTools = new Map<string, LocalTool>()
+
+/** 注册一组本地工具；同名的会覆盖，便于按当前开关动态调整 */
+export const registerLocalTools = (tools: LocalTool[]) => {
+  localTools.clear()
+  for (const tool of tools) {
+    localTools.set(tool.name, tool)
+  }
+}
+
+export const clearLocalTools = () => localTools.clear()
+
+/** 本地工具转成声明给模型的格式 */
+export const localToolsDeclaration = (): CustomTool[] =>
+  [...localTools.values()].map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.inputSchema,
+  }))
+
 /**
- * 执行一个客户端工具。返回文本结果；失败时抛出 McpError，由调用方包成 is_error 的
- * tool_result —— 模型能读到错误信息并自行决定下一步，比整轮失败更有用。
+ * 执行一个客户端工具：先查本地工具（搜索/抓取），再查 MCP 服务器。
+ * 返回文本结果；失败时抛错，由调用方包成 is_error 的 tool_result ——
+ * 模型能读到错误信息并自行决定下一步，比整轮失败更有用。
  */
 export const callTool = async (qualifiedName: string, input: unknown, signal: AbortSignal) => {
+  const local = localTools.get(qualifiedName)
+  if (local) {
+    return local.run(input, signal)
+  }
   const target = findServerForTool(qualifiedName)
   if (!target) {
     throw new McpError('tool', `Unknown or disconnected tool: ${qualifiedName}`)

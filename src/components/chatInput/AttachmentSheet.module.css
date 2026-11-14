@@ -121,3 +121,15 @@
 .backButton:active {
   background-color: var(--dsw-alias-interactive-bg-active);
 }
+
+/* 入口行右侧的当前值（模型名） */
+.entryValue {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
