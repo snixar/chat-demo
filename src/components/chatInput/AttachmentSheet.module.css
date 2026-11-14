@@ -1,0 +1,123 @@
+/* 附件入口：三张并排卡片，与 DeepSeek 客户端的拍照/相册/文件一致 */
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 4px 4px 8px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 104px;
+  padding: 16px 8px;
+  border: none;
+  border-radius: 16px;
+  background-color: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.card:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+@media (hover: hover) {
+  .card:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.label {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 主面板底部的 MCP 入口行 */
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 14px;
+  background-color: var(--dsw-specific-selector);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entry:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+.entryIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.entryLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 已启用数量角标 */
+.badge {
+  flex-shrink: 0;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.entryChevron {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* 子页面的返回按钮 */
+.backButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin-left: -6px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.backButton:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}

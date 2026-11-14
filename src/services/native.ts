@@ -16,15 +16,34 @@ type Bridge = {
   endFile: (token: string) => void
   abortFile: (token: string) => void
   setTheme: (dark: boolean) => void
+  /** 拍照：拉起系统相机，结果以 base64 + mime + 文件名回调 */
+  takePhoto: (requestId: string) => void
+  /** 相册：拉起系统图片选择器 */
+  pickImage: (requestId: string) => void
 }
+
+/** 原生选择器回传的一次结果 */
+type PickedFile = { name: string; mime: string; base64: string }
+
+/** 原生 HTTP 桥，供 MCP 客户端绕过 CORS 与明文限制，见 HttpBridge.java */
+type McpBridge = { request: (argumentJson: string) => void }
 
 declare global {
   interface Window {
     AndroidShell?: Bridge
+    AndroidMcp?: McpBridge
     /** 原生侧打开 blob: 地址时回调，由页面读取字节后交给原生 */
     __androidOpenBlob?: (url: string) => void
     /** 原生返回键优先调用；返回 true 表示页面已处理 */
     __androidHandleBack?: () => boolean
+    /** 原生 HTTP 结果回调，见 services/mcp/client.ts */
+    __mcpFetchResult?: (id: string, payload: string) => void
+    __mcpFetchHead?: (id: string, payload: string) => void
+    __mcpFetchChunk?: (id: string, chunk: string) => void
+    __mcpFetchEnd?: (id: string) => void
+    __mcpFetchError?: (id: string, message: string) => void
+    /** 拍照/相册的结果回调，见 MainActivity.deliverPickedFile */
+    __androidPickedFile?: (id: string, payload: string) => void
   }
 }
 
@@ -119,3 +138,106 @@ export const bindNativeBlobOpener = () => {
 export const syncNativeTheme = (dark: boolean) => {
   bridge()?.setTheme(dark)
 }
+
+/* ---------- 拍照 / 相册 ---------- */
+
+let pickSeq = 0
+const pickWaiters = new Map<string, (file: PickedFile | null) => void>()
+
+/** 原生侧回传选择结果；payload 为 JSON 字符串，空表示取消 */
+const ensurePickHook = () => {
+  if (window.__androidPickedFile) {
+    return
+  }
+  window.__androidPickedFile = (id: string, payload: string) => {
+    const resolve = pickWaiters.get(id)
+    pickWaiters.delete(id)
+    if (!payload) {
+      resolve?.(null)
+      return
+    }
+    try {
+      resolve?.(JSON.parse(payload) as PickedFile)
+    } catch {
+      resolve?.(null)
+    }
+  }
+}
+
+const base64ToFile = (picked: PickedFile): File => {
+  const binary = atob(picked.base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new File([bytes], picked.name || 'photo.jpg', {
+    type: picked.mime || 'image/jpeg',
+  })
+}
+
+const pickNative = (mode: 'camera' | 'gallery'): Promise<File[]> => {
+  const api = bridge()
+  const method = mode === 'camera' ? api?.takePhoto : api?.pickImage
+  if (!api || !method) {
+    return Promise.resolve([])
+  }
+  ensurePickHook()
+  const requestId = `pick-${++pickSeq}`
+  return new Promise<File[]>((resolve) => {
+    pickWaiters.set(requestId, (picked) => {
+      resolve(picked ? [base64ToFile(picked)] : [])
+    })
+    method.call(api, requestId)
+  })
+}
+
+/**
+ * 拍照。浏览器里没有原生相机，退化为图片文件选择（capture 属性在部分移动浏览器
+ * 会直接调起相机，桌面端则是普通文件选择）。
+ */
+export const pickCamera = async (): Promise<File[]> => {
+  if (!bridge()?.takePhoto) {
+    return pickViaInput('image/*')
+  }
+  return pickNative('camera')
+}
+
+/** 相册：原生走系统图片选择器，浏览器里用 input[accept=image/*] */
+export const pickGallery = async (): Promise<File[]> => {
+  if (!bridge()?.pickImage) {
+    return pickViaInput('image/*')
+  }
+  return pickNative('gallery')
+}
+
+/** 浏览器兜底：动态创建 input 让用户选图 */
+const pickViaInput = (accept: string): Promise<File[]> =>
+  new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = accept
+    input.multiple = false
+    input.style.display = 'none'
+    document.body.appendChild(input)
+    const cleanup = () => {
+      input.remove()
+    }
+    input.onchange = () => {
+      resolve(Array.from(input.files ?? []))
+      cleanup()
+    }
+    // 用户取消时不会触发 change，靠窗口重新获得焦点清理
+    window.addEventListener(
+      'focus',
+      () => {
+        setTimeout(() => {
+          if (!input.files?.length) {
+            resolve([])
+            cleanup()
+          }
+        }, 500)
+      },
+      { once: true }
+    )
+    input.click()
+  })

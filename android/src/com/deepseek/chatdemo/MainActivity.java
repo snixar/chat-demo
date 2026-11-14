@@ -35,6 +35,8 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_FILE = 1001;
     private static final int REQUEST_MIC = 1002;
     static final int REQUEST_SAVE = 1003;
+    private static final int REQUEST_CAMERA = 1004;
+    private static final int REQUEST_GALLERY = 1005;
 
     /** 让用户选择归档保存位置；结果在 onActivityResult 里复制临时文件 */
     static Intent saveIntent(String mime, String name) {
@@ -47,6 +49,11 @@ public final class MainActivity extends Activity {
 
     private WebView webView;
     private BlobBridge bridge;
+    private HttpBridge httpBridge;
+    /** 拍照时写入的 MediaStore Uri 与等待回传的请求 id */
+    private Uri pendingPhotoUri;
+    private String pendingPhotoRequest;
+    private String pendingGalleryRequest;
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest micRequest;
 
@@ -91,7 +98,9 @@ public final class MainActivity extends Activity {
         settings.setTextZoom(100);
 
         bridge = new BlobBridge(this, webView);
+        httpBridge = new HttpBridge(this);
         webView.addJavascriptInterface(bridge, "AndroidShell");
+        webView.addJavascriptInterface(httpBridge, "AndroidMcp");
         webView.setWebViewClient(new AssetServer(this, bridge));
         webView.setWebChromeClient(new ChromeClient());
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, length) ->
@@ -102,6 +111,70 @@ public final class MainActivity extends Activity {
         } else {
             webView.restoreState(savedInstanceState);
         }
+    }
+
+    /**
+     * 把原生 HTTP 的结果送回页面：页面在 window.__mcpFetchCallbacks 里按 id 注册了 resolver。
+     * 用 evaluateJavascript 而不是 addJavascriptInterface 回调，避免把结果编码进参数列表。
+     */
+    void deliverHttpResult(String requestId, String payload) {
+        webView.evaluateJavascript(
+                "window.__mcpFetchResult && window.__mcpFetchResult("
+                        + jsString(requestId) + "," + jsString(payload) + ")",
+                null);
+    }
+
+    /** 流式响应：状态行与响应头先到 */
+    void deliverHttpHead(String requestId, String payload) {
+        webView.evaluateJavascript(
+                "window.__mcpFetchHead && window.__mcpFetchHead("
+                        + jsString(requestId) + "," + jsString(payload) + ")",
+                null);
+    }
+
+    /** 流式响应：增量文本 */
+    void deliverHttpChunk(String requestId, String chunk) {
+        webView.evaluateJavascript(
+                "window.__mcpFetchChunk && window.__mcpFetchChunk("
+                        + jsString(requestId) + "," + jsString(chunk) + ")",
+                null);
+    }
+
+    void deliverHttpEnd(String requestId) {
+        webView.evaluateJavascript(
+                "window.__mcpFetchEnd && window.__mcpFetchEnd(" + jsString(requestId) + ")",
+                null);
+    }
+
+    void deliverHttpError(String requestId, String message) {
+        webView.evaluateJavascript(
+                "window.__mcpFetchError && window.__mcpFetchError("
+                        + jsString(requestId) + "," + jsString(message) + ")",
+                null);
+    }
+
+    private static String jsString(String value) {
+        StringBuilder out = new StringBuilder(value.length() + 2).append('"');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"': out.append("\\\""); break;
+                case '\\': out.append("\\\\"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\t': out.append("\\t"); break;
+                case '<': out.append("\\u003c"); break;
+                case '>': out.append("\\u003e"); break;
+                case '&': out.append("\\u0026"); break;
+                default:
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+            }
+        }
+        return out.append('"').toString();
     }
 
     /** 系统栏配色跟随页面主题；页面在 theme.ts 里切换深浅色后调用 */
@@ -240,6 +313,127 @@ public final class MainActivity extends Activity {
             }
             return;
         }
+        if (requestCode == REQUEST_CAMERA) {
+            String requestId = pendingPhotoRequest;
+            Uri photo = pendingPhotoUri;
+            pendingPhotoRequest = null;
+            pendingPhotoUri = null;
+            if (resultCode != RESULT_OK || photo == null) {
+                if (photo != null) {
+                    // 取消拍照：删掉占位的空记录
+                    getContentResolver().delete(photo, null, null);
+                }
+                deliverPickedFile(requestId, (byte[]) null, null, null);
+                return;
+            }
+            deliverPickedFile(requestId, photo);
+            return;
+        }
+        if (requestCode == REQUEST_GALLERY) {
+            String requestId = pendingGalleryRequest;
+            pendingGalleryRequest = null;
+            Uri uri = resultCode == RESULT_OK && data != null ? data.getData() : null;
+            if (uri == null) {
+                deliverPickedFile(requestId, (byte[]) null, null, null);
+                return;
+            }
+            deliverPickedFile(requestId, uri);
+            return;
+        }
+    }
+
+    /**
+     * 拍照。系统相机需要能写入目标 Uri，自己注册的 ContentProvider 是 exported=false、
+     * 相机拿不到权限，因此改用 MediaStore 创建一张待写入的图片（相机可写）。
+     */
+    void startCamera(String requestId) {
+        try {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME,
+                    "chat-demo-" + System.currentTimeMillis() + ".jpg");
+            values.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                        "Pictures/chat-demo");
+            }
+            Uri target = getContentResolver().insert(
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (target == null) {
+                deliverPickedFile(requestId, (byte[]) null, null, null);
+                return;
+            }
+            pendingPhotoUri = target;
+            pendingPhotoRequest = requestId;
+            Intent intent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+            intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, target);
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(intent, REQUEST_CAMERA);
+        } catch (Exception e) {
+            android.util.Log.w("ChatDemo", "camera failed", e);
+            pendingPhotoUri = null;
+            pendingPhotoRequest = null;
+            deliverPickedFile(requestId, (byte[]) null, null, null);
+        }
+    }
+
+    /** 相册：系统图片选择器，单选 */
+    void startGallery(String requestId) {
+        pendingGalleryRequest = requestId;
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, getString(R.string.choose_image)),
+                    REQUEST_GALLERY);
+        } catch (android.content.ActivityNotFoundException e) {
+            pendingGalleryRequest = null;
+            deliverPickedFile(requestId, (byte[]) null, null, null);
+        }
+    }
+
+    /** 把选中的图片读成 base64 回传页面 */
+    void deliverPickedFile(String requestId, Uri uri) {
+        if (requestId == null) {
+            return;
+        }
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                deliverPickedFile(requestId, (byte[]) null, null, null);
+                return;
+            }
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[32 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+            String mime = getContentResolver().getType(uri);
+            deliverPickedFile(requestId, out.toByteArray(),
+                    mime == null ? "image/*" : mime, "image");
+        } catch (Exception e) {
+            android.util.Log.w("ChatDemo", "read image failed", e);
+            deliverPickedFile(requestId, (byte[]) null, null, null);
+        }
+    }
+
+    /** 最终统一出口：把字节编码为 JSON 交给页面的 __androidPickedFile */
+    void deliverPickedFile(String requestId, byte[] bytes, String mime, String name) {
+        if (requestId == null) {
+            return;
+        }
+        String payload = "";
+        if (bytes != null && bytes.length > 0) {
+            String ext = mime.contains("png") ? ".png" : mime.contains("webp") ? ".webp" : ".jpg";
+            String b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+            payload = "{\"name\":" + jsString(name.endsWith(ext) ? name : name + ext)
+                    + ",\"mime\":" + jsString(mime) + ",\"base64\":" + jsString(b64) + "}";
+        }
+        final String json = payload;
+        final String id = requestId;
+        runOnUiThread(() -> webView.evaluateJavascript(
+                "window.__androidPickedFile && window.__androidPickedFile("
+                        + jsString(id) + "," + jsString(json) + ")", null));
     }
 
     @Override
@@ -280,8 +474,12 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (httpBridge != null) {
+            httpBridge.shutdown();
+        }
         if (webView != null) {
             webView.removeJavascriptInterface("AndroidShell");
+            webView.removeJavascriptInterface("AndroidMcp");
             webView.destroy();
         }
         super.onDestroy();

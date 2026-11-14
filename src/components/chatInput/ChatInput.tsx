@@ -1,12 +1,12 @@
 import clsx from 'clsx'
-import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   IconGlobeLanguageOutline14,
-  IconPaperclipOutline16,
   IconSendOutline16,
   IconStopFill16,
   IconThinkOutline14,
 } from '../base/icons.js'
+import { AttachmentSheet, useAttachmentPicker } from './AttachmentSheet.js'
 import { setSearch, setThinking, useSettings } from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
@@ -56,6 +56,8 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
+  /** 附件入口面板：拍照 / 相册 / 文件 */
+  const [attachOpen, setAttachOpen] = useState(false)
 
   useLayoutEffect(() => {
     const toggles = togglesRef.current
@@ -100,6 +102,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     [sessionId]
   )
   const dragging = useFileDrop(acceptFiles)
+  // 原生相机与相册都通过它拿到 File，再走同一条 acceptFiles 流程
+  const picker = useAttachmentPicker(acceptFiles, () => {
+    if (!useChatStore.getState().importingHistory && ensureApiKey()) {
+      fileInputRef.current?.click()
+    }
+  })
 
   /** 转写结果插入到光标处，并把光标移到插入内容之后 */
   const voice = useVoiceInput((transcript) => {
@@ -244,10 +252,10 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           <IconButton
             size="m"
             tone="primary"
-            icon={<IconPaperclipOutline16 />}
+            icon={<PlusCircleIcon />}
             tooltip={t('uploadFile')}
             disabled={importingHistory}
-            onClick={() => ensureApiKey() && fileInputRef.current?.click()}
+            onClick={() => ensureApiKey() && setAttachOpen(true)}
           />
           <input
             ref={fileInputRef}
@@ -286,6 +294,31 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         </div>
       </div>
       {dragging ? <DragMask /> : null}
+      <AttachmentSheet
+        open={attachOpen}
+        sessionId={sessionId}
+        onClose={() => setAttachOpen(false)}
+        onCamera={() => {
+          setAttachOpen(false)
+          picker.camera()
+        }}
+        onGallery={() => {
+          setAttachOpen(false)
+          picker.gallery()
+        }}
+        onFile={() => {
+          setAttachOpen(false)
+          picker.file()
+        }}
+      />
     </div>
   )
 }
+
+/** 加号图标：圆圈内十字，对应 DeepSeek 的附件入口 */
+const PlusCircleIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
+    <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M10 6.5v7M6.5 10h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+)

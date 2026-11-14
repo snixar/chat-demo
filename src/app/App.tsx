@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useTranslate } from '../i18n/index.js'
+import { translate, useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
@@ -14,8 +14,8 @@ import { closeSearchPanel, useSearchPanel } from '../components/search/searchPan
 import { SessionView } from '../components/session/SessionView.js'
 import { MobileHeader } from '../components/session/MobileHeader.js'
 import { Welcome } from '../components/session/Welcome.js'
-import { ensureApiKey } from '../components/settings/settingsDialogState.js'
-import { SettingsDialog } from '../components/settings/SettingsDialog.js'
+import { popSettingsRoute } from '../components/settings/settingsDialogState.js'
+import { SettingsScreen } from '../components/settings/SettingsScreen.js'
 import { Toast } from '../components/base/Toast.js'
 import { showToast } from '../components/base/toastState.js'
 import { onUploadNotice } from '../services/attachments.js'
@@ -25,6 +25,7 @@ import { CollapsedSider } from '../components/sider/CollapsedSider.js'
 import { closeMobileSider, useMobileSider } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
 import { closeTopModal } from '../components/base/Modal.js'
+import { closeTopSheet } from '../components/base/BottomSheet.js'
 import { bindNativeBack, bindNativeBlobOpener } from '../services/native.js'
 import styles from './App.module.css'
 
@@ -74,6 +75,14 @@ export const App = () => {
   useEffect(
     () =>
       bindNativeBack(() => {
+        // 底部面板在最上层，先关它
+        if (closeTopSheet()) {
+          return true
+        }
+        // 设置页优先：有二级页先回上一级，在列表页则关闭整个设置页
+        if (popSettingsRoute()) {
+          return true
+        }
         if (closeTopModal()) {
           return true
         }
@@ -92,8 +101,11 @@ export const App = () => {
 
   useEffect(() => {
     void initChat()
-    // 首次打开先在设置里输入 API Key
-    ensureApiKey()
+    // 没有 API Key 时提示去设置，但不强制跳转：先让用户看到主界面（欢迎页）
+    if (!useSettings.getState().apiKey) {
+      // 只在挂载时提示一次，不订阅语言变化
+      showToast(translate('apiKeyRequiredToast'))
+    }
   }, [])
 
   return (
@@ -155,7 +167,7 @@ export const App = () => {
         </main>
         <SearchPanel />
       </div>
-      <SettingsDialog />
+      <SettingsScreen />
       <Toast />
     </>
   )

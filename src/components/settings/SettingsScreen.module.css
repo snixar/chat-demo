@@ -1,0 +1,737 @@
+/**
+ * 设置页样式，布局对齐 rikkahub（真机截图比对得出）：
+ * - 大标题左对齐，随页面滚动
+ * - 分组标题用**主色**（不是灰），加粗小字号
+ * - 卡片圆角 20px、卡片内各项之间 2px 缝隙、分组之间 16px
+ * - 列表项：36px 圆形彩色底图标 + 大标题（15px）+ 灰色副标题，右侧可放值/箭头
+ * - 二级页是「大标题 + 灰色说明 + 整宽控件」的表单流，用分隔线切分，不用卡片
+ */
+
+.page {
+  position: absolute;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--settings-page-bg);
+  color: var(--dsw-alias-label-primary);
+  animation: settingsEnter 0.18s var(--ds-ease-in-out);
+
+  --settings-page-bg: var(--dsw-static-neutral-bluish-50);
+  --settings-card-bg: var(--dsw-alias-bg-base);
+  --settings-input-bg: var(--dsw-static-neutral-bluish-75);
+}
+
+[data-ds-dark-theme] .page {
+  --settings-page-bg: var(--dsw-static-neutral-bluish-950);
+  --settings-card-bg: var(--dsw-static-neutral-bluish-850);
+  --settings-input-bg: var(--dsw-static-neutral-bluish-900);
+}
+
+@keyframes settingsEnter {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 顶栏：左侧圆形返回按钮 + 左对齐大标题 */
+.topBar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 64px;
+  padding: 8px 16px 4px;
+}
+
+.backButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--settings-card-bg);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.backButton:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+.topTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 滚动区 */
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 底部留出悬浮操作栏的高度 */
+  padding: 8px 16px calc(96px + env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+
+/* 分组 */
+.group {
+  margin-bottom: 16px;
+}
+
+/* 分组标题：用 DeepSeek 的灰字，位置与字号沿用 rikkahub 的分组结构 */
+.groupTitle {
+  padding: 8px 4px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 卡片：圆角 20，内部项之间 2px 缝隙 */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+/* 单行：图标 + 两行文字 + 右侧 */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 4px;
+  background-color: var(--settings-card-bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* 首尾项用大圆角，中间项小圆角，贴近 rikkahub 的 cardGroupItemShape */
+  transition: border-radius var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.card > .row:first-child {
+  border-radius: 20px 20px 4px 4px;
+}
+
+.card > .row:last-child {
+  border-radius: 4px 4px 20px 20px;
+}
+
+.card > .row:only-child {
+  border-radius: 20px;
+}
+
+.rowStatic {
+  cursor: default;
+}
+
+.row:not(.rowStatic):active {
+  border-radius: 20px;
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+@media (hover: hover) {
+  .row:not(.rowStatic):hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+/* 线性图标，与 DeepSeek 客户端一致：无底色，24px 区域 */
+.rowIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 两行结构（rikkahub 布局）：主标题 + 灰色副标题，字号用 DeepSeek 的值 */
+.rowLabel {
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.rowDescription {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 右侧值：胶囊标签（对应 CardGroupValue） */
+.rowValue {
+  flex-shrink: 0;
+  max-width: 46%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.rowControl {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.chevron {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* ---------- 二级页：表单流（不是卡片） ---------- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 一个表单项：大标题 + 灰色说明 + 控件，底部一条分隔线 */
+.fieldBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 4px;
+}
+
+.fieldBlock + .fieldBlock,
+.fieldBlock + .rowStatic,
+.rowStatic + .fieldBlock {
+  box-shadow: inset 0 1px 0 var(--dsw-alias-border-l1);
+}
+
+/* 表单标题：结构与 rikkahub 一致（标题 + 说明 + 控件），字号用 DeepSeek 的值 */
+.fieldTitle {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 灰色说明 */
+.fieldHint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 整宽输入框：形态同 rikkahub 的 OutlinedTextField（白底 + 描边） */
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  margin-top: 6px;
+  padding: 13px 14px;
+  /* 页面本身是浅灰，输入框必须用白底 + 可见描边才能区分 */
+  border: 1.5px solid var(--dsw-alias-border-l3);
+  border-radius: 12px;
+  outline: none;
+  background-color: var(--settings-card-bg);
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.input:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.input::placeholder {
+  color: var(--dsw-alias-label-caption);
+}
+
+.textarea {
+  min-height: 120px;
+  padding: 14px 16px;
+  resize: vertical;
+  line-height: 22px;
+}
+
+/* ---------- 分段选择器（传输类型）：对应 rikkahub 的 ConnectedChoiceButtons ---------- */
+
+.segmented {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+  padding: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background-color: var(--dsw-specific-selector);
+  gap: 3px;
+}
+
+.segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  min-height: 44px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.segmentSelected {
+  background-color: var(--settings-card-bg);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+/* 开关行：左侧说明，右侧 switch */
+.switchRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 4px;
+}
+
+.switchRow + .switchRow {
+  box-shadow: inset 0 1px 0 var(--dsw-alias-border-l1);
+}
+
+/* 全宽主按钮（如「添加请求头」）：对应 rikkahub 的 Button fillMaxWidth */
+.blockButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-primary);
+  font-size: 15px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.blockButton:disabled {
+  opacity: 0.5;
+}
+
+.blockButton:active:not(:disabled) {
+  opacity: 0.85;
+}
+
+/* 次级全宽按钮 */
+.blockButtonOutline {
+  background-color: transparent;
+  color: var(--dsw-alias-brand-primary);
+  box-shadow: inset 0 0 0 1.5px var(--dsw-alias-brand-primary);
+}
+
+/* ---------- 主题选择 ---------- */
+
+.themeOptions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.themeOption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 84px;
+  border: 1.5px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.themeOptionSelected {
+  border-color: var(--dsw-alias-brand-primary);
+  background-color: var(--dsw-specific-selector);
+  color: var(--dsw-alias-brand-primary);
+}
+
+/* ---------- 提示 ---------- */
+
+.hint {
+  padding: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.errorText {
+  padding: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* 状态点 */
+.dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--dsw-alias-label-caption);
+}
+
+.dotReady {
+  background-color: var(--dsw-static-green-500);
+}
+
+.dotConnecting {
+  background-color: var(--dsw-static-amber-500);
+}
+
+.dotError {
+  background-color: var(--dsw-alias-state-error-primary);
+}
+
+/* 开关 */
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 52px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--dsw-alias-label-secondary);
+  border-radius: 16px;
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--dsw-alias-label-secondary);
+  transform: translateY(-50%);
+  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.switchOn {
+  border-color: var(--dsw-alias-brand-primary);
+  background-color: var(--dsw-alias-brand-primary);
+}
+
+.switchOn::after {
+  background-color: #fff;
+  transform: translate(20px, -50%);
+}
+
+/*
+ * 底部操作栏：固定在页面底部悬浮（对应 rikkahub 的悬浮按钮组）。
+ * 因为脱离文档流，滚动区底部已预留 96px，避免最后一项被压住。
+ */
+.actions {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(520px, calc(100% - 32px));
+  margin: 0;
+  padding: 6px;
+  border-radius: 999px;
+  background-color: var(--settings-card-bg);
+  box-shadow: var(--dsw-shadow-lv3);
+  transform: translateX(-50%);
+}
+
+.actions > button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 42px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--settings-card-bg);
+  color: var(--dsw-alias-label-primary);
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.actions > button:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+.actions > button:disabled {
+  opacity: 0.45;
+}
+
+.actionDanger {
+  color: var(--dsw-alias-state-error-primary) !important;
+}
+
+/* ---------- MCP 列表项（卡片式，对应 rikkahub 的 McpServerItem） ---------- */
+
+.serverCard {
+  display: flex;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 16px;
+  border: none;
+  border-radius: 20px;
+  background-color: var(--settings-card-bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.serverCard:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+.serverCard + .serverCard {
+  margin-top: 8px;
+}
+
+.serverState {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  padding-top: 2px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.serverBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.serverHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.serverName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.serverDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--dsw-static-green-500);
+}
+
+.serverDotError {
+  background-color: var(--dsw-alias-state-error-primary);
+}
+
+.serverDotIdle {
+  background-color: var(--dsw-alias-label-caption);
+}
+
+/* 传输方式胶囊标签（对应 rikkahub 的 Tag） */
+.tag {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background-color: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 服务器错误信息：内联红字，可换行 */
+.serverError {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--dsw-alias-state-error-primary);
+  word-break: break-word;
+}
+
+/* 空状态：居中 */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 15px;
+}
+
+.emptyHint {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 工具卡（MCP 详情页的「工具」标签页） */
+.toolCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 20px;
+  background-color: var(--settings-card-bg);
+}
+
+.toolCard + .toolCard {
+  margin-top: 8px;
+}
+
+.toolHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toolName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.toolDesc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 页签（基本设置 / 工具）：对应 rikkahub 的 PagerTabs */
+.tabs {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 0 16px 8px;
+  margin-top: -4px;
+}
+
+.tab {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 999px;
+  background-color: var(--settings-card-bg);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tabActive {
+  background-color: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 添加/操作按钮行（MCP 列表底部） */
+.addRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 20px;
+  background-color: var(--settings-card-bg);
+  color: var(--dsw-alias-label-primary);
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.addRow + .addRow {
+  margin-top: 8px;
+}
+
+.addRow:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}

@@ -48,6 +48,11 @@ public final class BlobProvider extends ContentProvider {
         ENTRIES.put(token, new Entry(file, mime, name));
     }
 
+    /** 供系统相机写入：注册一个尚未存在的临时文件，走 openFile 的写模式 */
+    static void registerWritable(String token, File file, String mime, String name) {
+        ENTRIES.put(token, new Entry(file, mime, name));
+    }
+
     @Override
     public boolean onCreate() {
         return true;
@@ -63,10 +68,18 @@ public final class BlobProvider extends ContentProvider {
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         Entry entry = entry(uri);
-        if (entry == null || !entry.file.exists()) {
+        if (entry == null) {
             throw new FileNotFoundException("Unknown blob: " + uri);
         }
-        return ParcelFileDescriptor.open(entry.file, ParcelFileDescriptor.MODE_READ_ONLY);
+        // 相机写入时文件尚未创建；读模式要求文件已存在
+        if (!entry.file.exists() && !"w".equals(mode) && !"rw".equals(mode) && !"rwt".equals(mode)) {
+            throw new FileNotFoundException("Unknown blob: " + uri);
+        }
+        int flags = ParcelFileDescriptor.MODE_CREATE
+                | ("w".equals(mode) || "rw".equals(mode) || "rwt".equals(mode)
+                    ? ParcelFileDescriptor.MODE_WRITE_ONLY | ParcelFileDescriptor.MODE_TRUNCATE
+                    : ParcelFileDescriptor.MODE_READ_ONLY);
+        return ParcelFileDescriptor.open(entry.file, flags);
     }
 
     @Override

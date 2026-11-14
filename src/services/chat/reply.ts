@@ -46,6 +46,14 @@ const toReplyBlock = (block: OutputBlockStart, now: number): ReplyBlock | null =
     case 'web_search_tool_result':
     case 'web_fetch_tool_result':
       return block
+    case 'tool_use':
+      return {
+        type: 'tool_use',
+        id: block.id,
+        name: block.name,
+        // 参数可能为空对象，实际内容由 input_json_delta 追加
+        input: block.input ?? {},
+      }
     default:
       return null
   }
@@ -63,6 +71,19 @@ const updateBlock = (
   const blocks = [...reply.blocks]
   blocks[index] = update(block)
   return { ...reply, blocks }
+}
+
+/** 工具参数的分片拼完后是一个 JSON 对象；空串按空对象处理 */
+const parseToolInput = (raw: string): unknown => {
+  const text = raw.trim()
+  if (!text) {
+    return {}
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { __raw: text }
+  }
 }
 
 /**
@@ -84,8 +105,7 @@ export const applyEvent = (
       blockIndexes.delete(event.index)
       const block = toReplyBlock(event.content_block, now)
       if (!block) {
-        // 客户端工具内容不保存；未完成的工具往返也不能作为续写前缀。
-        return event.content_block.type === 'tool_use' ? { ...next, prefix: false } : next
+        return next
       }
       blockIndexes.set(event.index, next.blocks.length)
       return { ...next, blocks: [...next.blocks, block] }
@@ -109,6 +129,11 @@ export const applyEvent = (
         if (block.type === 'text' && delta.type === 'citations_delta') {
           return { ...block, citations: [...(block.citations ?? []), delta.citation] }
         }
+        // 客户端工具参数分片下发，累积后再解析成对象
+        if (block.type === 'tool_use' && delta.type === 'input_json_delta') {
+          const raw = typeof block.input === 'string' ? block.input : ''
+          return { ...block, input: raw + delta.partial_json }
+        }
         return block
       })
     }
@@ -118,11 +143,18 @@ export const applyEvent = (
         return next
       }
       blockIndexes.delete(event.index)
-      return updateBlock(next, index, (block) =>
-        block.type === 'thinking' && block.startedAt !== undefined && block.endedAt === undefined
-          ? { ...block, endedAt: now }
-          : block
-      )
+      return updateBlock(next, index, (block) => {
+        if (block.type === 'thinking') {
+          return block.startedAt !== undefined && block.endedAt === undefined
+            ? { ...block, endedAt: now }
+            : block
+        }
+        // 客户端工具：把累积的分片解析成参数对象，解析失败也保留原文供排查
+        if (block.type === 'tool_use' && typeof block.input === 'string') {
+          return { ...block, input: parseToolInput(block.input) }
+        }
+        return block
+      })
     }
     case 'message_delta':
       return {
@@ -167,6 +199,8 @@ export const getReplyText = (reply: AssistantMessage) =>
  * 只有正常达到输出上限或被停止的回复可续写，报错回复不能续写。
  * 末条限制由调用方判断，拒绝和客户端工具调用不能续写。
  * 本轮含服务端工具调用或结果（含 READ_LINK 和孤立结果块）的回复不能续写。
+ * 含 MCP 工具往返的回复也不能续写：tool_use/tool_result 必须成对且完整回传，
+ * 续写只发送末尾 assistant 前缀，无法带上配对的结果。
  * 服务端模板提示不能作为续写前缀。
  */
 export const canContinueReply = (reply: AssistantMessage): boolean => {
@@ -179,27 +213,30 @@ export const canContinueReply = (reply: AssistantMessage): boolean => {
         block.type === 'server_tool_use' ||
         block.type === 'web_search_tool_result' ||
         block.type === 'web_fetch_tool_result' ||
+        block.type === 'tool_use' ||
+        block.type === 'tool_result' ||
         (block.type === 'text' && block.isTemplate)
     )
   ) {
     return false
   }
   return (
-    reply.status === 'stopped' ||
-    (reply.status === 'done' && reply.stopReason === 'max_tokens')
+    reply.status === 'stopped' || (reply.status === 'done' && reply.stopReason === 'max_tokens')
   )
 }
 
 /**
- * 已结束或停止且有回答文本的回复才放进上下文；被安全拒绝的轮次不回传。
- * 服务端模板提示不进入上下文。
+ * 已结束或停止的回复才放进上下文；被安全拒绝的轮次不回传。服务端模板提示不进入上下文。
+ * 含客户端工具往返的回复即使没有正文也要保留：tool_use 与 tool_result 必须成对回传，
+ * 否则模型会丢失上一轮的工具上下文。
  */
 const isUsableReply = (message: Message): message is AssistantMessage =>
   message.role === 'assistant' &&
   (message.status === 'done' || message.status === 'stopped') &&
   message.stopReason !== 'refusal' &&
   !message.blocks.some((block) => block.type === 'text' && block.isTemplate) &&
-  getReplyText(message) !== ''
+  (getReplyText(message) !== '' ||
+    message.blocks.some((block) => block.type === 'tool_use' || block.type === 'tool_result'))
 
 /** 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用 */
 const toUserParam = ({ content, files }: UserMessage): MessageParam => {
@@ -217,10 +254,11 @@ const toUserParam = ({ content, files }: UserMessage): MessageParam => {
  * - 历史思考及其签名不回传；开启思考时续写只保留本轮非空白思考及其签名；
  * - 文本块去掉 citations（服务端忽略）。相邻文本直接拼接，被思考或工具隔开的文本用空行连接；
  *   省略历史思考后仍保留其前后正文的空行；
- * - 工具调用和结果只保留 kind 为 read_link 的块，其他历史工具块不回传；
+ * - 工具调用和结果只保留 kind 为 read_link 的块，其他历史服务器工具块不回传；
+ * - 客户端工具调用（tool_use）回传，结果另起一条 user 消息；
  * - 阅读链接结果原样回传，保留 signature：服务端解密后将页面拼回该轮提问末尾；
  */
-const toAssistantParam = (
+export const toAssistantParam = (
   { blocks }: AssistantMessage,
   prefix = false,
   thinking = false
@@ -275,12 +313,47 @@ const toAssistantParam = (
       !unsignedReadLinks.has(block.tool_use_id)
     ) {
       content.push(block)
+    } else if (block.type === 'tool_use') {
+      // 客户端工具调用要原样回传，模型才能和后面的 tool_result 配对
+      const { type, id, name, input } = block
+      content.push({ type, id, name, input })
     }
   }
   return {
     role: 'assistant',
     content: content.filter((block) => block.type !== 'text' || block.text !== ''),
   }
+}
+
+/**
+ * 把一轮回复里的客户端工具结果抽成一条 user 消息。协议要求 tool_result 紧跟对应的
+ * assistant 之后，且同一条 user 消息可以携带多个结果。
+ */
+const toToolResultParam = (
+  blocks: ReplyBlock[]
+): Extract<MessageParam, { role: 'user' }> | null => {
+  const results = blocks.flatMap((block) =>
+    block.type === 'tool_result'
+      ? [
+          {
+            type: 'tool_result' as const,
+            tool_use_id: block.tool_use_id,
+            content: block.content,
+            ...(block.is_error ? { is_error: true } : {}),
+          },
+        ]
+      : []
+  )
+  return results.length > 0 ? { role: 'user', content: results } : null
+}
+
+/**
+ * 多轮工具调用时按顺序取出 tool_result 消息。调用方传入某一轮的块，
+ * 每条 user 消息都只带该轮的结果，保持与 assistant 的配对顺序。
+ */
+export const toToolResultParams = (roundBlocks: ReplyBlock[]): MessageParam[] => {
+  const param = toToolResultParam(roundBlocks)
+  return param ? [param] : []
 }
 
 /** 历史中会进入请求上下文的轮次：提问后紧跟可用回答的才保留 */
@@ -323,6 +396,11 @@ export const toRequestMessages = (
     }
     appendReminder(reply.latestReminder)
     messages.push(toUserParam(user), toAssistantParam(reply))
+    // 工具结果必须紧跟对应的 assistant，否则模型无法把调用和结果配对
+    const toolResults = toToolResultParam(reply.blocks)
+    if (toolResults) {
+      messages.push(toolResults)
+    }
   }
   appendReminder(latestReminder)
   messages.push(toUserParam(question))

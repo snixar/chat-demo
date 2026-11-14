@@ -27,6 +27,7 @@ import {
   type SearchStep,
   type Source,
   type Step,
+  type ToolCallStep,
 } from '../../services/chat/view.js'
 import { Tooltip } from '../base/Tooltip.js'
 import { Markdown } from '../markdown/Markdown.js'
@@ -158,9 +159,45 @@ const StepItem = ({
       return <FindRow step={step} isLast={isLast} />
     case 'read_link':
       return <ReadLinkRow step={step} isLast={isLast} />
+    case 'tool_call':
+      return <ToolCallRow step={step} isLast={isLast} />
     default:
       return null
   }
+}
+
+/**
+ * MCP 工具调用：一行「已调用 / 正在调用 工具名」，展开可看参数与结果。
+ * 结果可能很长，默认折叠，避免撑开整个对话。
+ */
+const ToolCallRow = ({ step, isLast }: { step: ToolCallStep; isLast: boolean }) => {
+  const t = useTranslate()
+  const [open, setOpen] = useState(false)
+  const running = step.status === 'wip'
+  const failed = step.status === 'failed'
+  const label = running
+    ? t('toolCallRunning', { name: step.name })
+    : failed
+      ? t('toolCallFailed', { name: step.name })
+      : t('toolCallDone', { name: step.name })
+  return (
+    <ContentItem isLast={isLast} active={running}>
+      <button type="button" className={styles.stepTitle} onClick={() => setOpen((value) => !value)}>
+        <span className={clsx(styles.stepText, failed && styles.stepFailed)}>{label}</span>
+        {open ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
+      </button>
+      {open ? (
+        <div className={styles.stepDetail}>
+          <pre className={styles.stepCode}>{JSON.stringify(step.input ?? {}, null, 2)}</pre>
+          {step.result ? (
+            <pre className={clsx(styles.stepCode, step.isError && styles.stepFailed)}>
+              {step.result}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </ContentItem>
+  )
 }
 
 /** 思考或过程性文字：左侧圆点 + 竖线，小号 markdown */

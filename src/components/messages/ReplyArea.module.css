@@ -314,3 +314,47 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* MCP 工具调用：标题行可点击展开参数与结果 */
+.stepTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stepText {
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.stepFailed {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.stepDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.stepCode {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--dsw-alias-markdown-code-block);
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13);
+  font-family: var(--ds-font-family-code);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}

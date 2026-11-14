@@ -118,8 +118,19 @@ export type ServerToolBlock =
   | WebSearchToolResultBlock
   | WebFetchToolResultBlock
 
-/** 用于识别客户端工具调用的内容块类型 */
+/**
+ * 客户端工具调用：与 server_tool_use 不同，由本应用执行（MCP 服务器上的工具），
+ * 执行结果作为 tool_result 回传后模型继续生成。
+ */
 export type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown }
+
+/** 客户端工具的执行结果，回传时必须紧跟在对应 tool_use 所在的 assistant 之后 */
+export type ToolResultBlock = {
+  type: 'tool_result'
+  tool_use_id: string
+  content: string
+  is_error?: boolean
+}
 
 // ---------- 请求 ----------
 
@@ -152,12 +163,19 @@ export type AssistantBlockParam =
   | ServerToolUseBlockParam
   | WebSearchToolResultBlockParam
   | WebFetchToolResultBlockParam
+  | ToolUseBlock
+
+/** 工具结果作为 user 消息回传，可附带文本；多个结果可放在同一条 user 消息里 */
+export type ToolResultBlockParam = ToolResultBlock
 
 /** 末尾 assistant 自动触发继续生成，无需 prefix 字段 */
 export type MessageParam =
   /** Chat Engine 扩展角色，位于对应 user 前；需服务端支持 latest_reminder。 */
   | { role: 'latest_reminder'; content: string }
-  | { role: 'user'; content: string | (FileBlockParam | TextBlockParam)[] }
+  | {
+      role: 'user'
+      content: string | (FileBlockParam | TextBlockParam | ToolResultBlockParam)[]
+    }
   | { role: 'assistant'; content: AssistantBlockParam[] }
 
 /** 开启联网搜索与边想边搜 */
@@ -172,12 +190,28 @@ export type DeepseekReadUrlTool = {
   name: 'deepseek_read_url'
 }
 
+/**
+ * 自定义（客户端）工具声明，按 Anthropic 兼容格式放在 tools 里。
+ * 模型返回 tool_use 后由本应用执行（MCP），结果以 tool_result 回传。
+ * 名称需满足 tools 的命名约束，因此 MCP 工具名会带服务器前缀。
+ */
+export type CustomTool = {
+  name: string
+  description: string
+  input_schema: {
+    type: 'object'
+    properties?: Record<string, unknown>
+    required?: string[]
+    [key: string]: unknown
+  }
+}
+
 export type CreateMessageRequest = {
   model: ChatModel
   system: string
   messages: MessageParam[]
   thinking: { type: 'enabled' | 'disabled' }
-  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
+  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool | CustomTool)[]
   safety_check: { level: 'high' }
   title?: { enabled: boolean }
 }

@@ -6,4 +6,5 @@
     <string name="no_app_to_open">没有可以打开该文件的应用</string>
     <string name="saved">已保存</string>
     <string name="save_failed">保存失败</string>
+    <string name="choose_image">选择图片</string>
 </resources>

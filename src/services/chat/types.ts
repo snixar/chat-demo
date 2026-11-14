@@ -62,8 +62,37 @@ export type TextPart = {
   isTemplate?: boolean
 }
 
+/**
+ * 客户端工具调用（MCP）。参数经 input_json_delta 累积，结果由本应用执行后写入同一条回复，
+ * 因此一次回复里会同时出现 tool_use 与紧随其后的 tool_result。
+ */
+export type ClientToolCallPart = {
+  type: 'tool_use'
+  /** 协议里的调用 id，tool_result 靠它配对 */
+  id: string
+  /** 限定名，形如 mcp__<serverId>__<toolName> */
+  name: string
+  input: unknown
+  /** 执行用的原始工具名（不带前缀），仅用于展示 */
+  displayName?: string
+}
+
+export type ClientToolResultPart = {
+  type: 'tool_result'
+  tool_use_id: string
+  content: string
+  is_error: boolean
+  /** 执行耗时（毫秒），用于展示 */
+  elapsedMs?: number
+}
+
 /** 服务端工具调用与结果块按协议原样保存；历史请求只回传 read_link 调用与结果 */
-export type ReplyBlock = ThinkingPart | TextPart | ServerToolBlock
+export type ReplyBlock =
+  | ThinkingPart
+  | TextPart
+  | ServerToolBlock
+  | ClientToolCallPart
+  | ClientToolResultPart
 
 /**
  * pending：已发出请求，还没收到事件；streaming：正在接收；
@@ -114,6 +143,11 @@ export type Session = {
   messages: Message[]
   /** undefined 表示线性消息列表；null 表示空会话。 */
   rootMessageId?: string | null
+  /**
+   * 本会话启用的 MCP 服务器 id。缺省表示用全部已启用的服务器；
+   * 空数组表示本会话关闭全部 MCP。
+   */
+  mcpServerIds?: string[]
 }
 
 /** 会话列表元数据；消息只在打开会话时加载。 */

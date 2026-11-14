@@ -66,7 +66,27 @@ export type ThinkingStep = { type: 'thinking'; key: string; blocks: ThinkingPart
 /** 工具调用前输出的说明文字 */
 export type PreambleStep = { type: 'text'; key: string; markdown: string }
 
-export type Step = SearchStep | OpenStep | FindStep | ReadLinkStep | ThinkingStep | PreambleStep
+/** 客户端（MCP）工具调用：一次调用一个步骤，结果是执行后的回填 */
+export type ToolCallStep = {
+  type: 'tool_call'
+  key: string
+  /** 展示用名称（去掉服务器前缀） */
+  name: string
+  input: unknown
+  status: ToolStatus
+  result?: string
+  isError?: boolean
+  elapsedMs?: number
+}
+
+export type Step =
+  | SearchStep
+  | OpenStep
+  | FindStep
+  | ReadLinkStep
+  | ThinkingStep
+  | PreambleStep
+  | ToolCallStep
 
 export type ReplyView = {
   steps: Step[]
@@ -76,6 +96,16 @@ export type ReplyView = {
   sources: Source[]
   /** 搜索到的网页（去重），用于底部汇总与搜索结果列表 */
   searchResults: Source[]
+}
+
+/** MCP 工具名带 `mcp__<serverId>__` 前缀，展示时去掉；与 client.ts 的解析规则一致 */
+export const displayToolName = (qualified: string) => {
+  if (!qualified.startsWith('mcp__')) {
+    return qualified
+  }
+  const rest = qualified.slice('mcp__'.length)
+  const separator = rest.indexOf('__')
+  return separator >= 0 ? rest.slice(separator + 2) : rest
 }
 
 export const getSiteName = (url: string) => {
@@ -244,6 +274,39 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
         mergedThinking = { type: 'thinking', key: `thinking-${index}`, blocks: [block] }
         steps.push(mergedThinking)
       }
+      return
+    }
+    if (block.type === 'tool_use') {
+      flushPreamble()
+      // 结果块在同一个回复里紧跟调用，按 tool_use_id 配对后回填到步骤上
+      const paired = reply.blocks.find(
+        (item) => item.type === 'tool_result' && item.tool_use_id === block.id
+      )
+      const toolResult = paired?.type === 'tool_result' ? paired : undefined
+      steps.push({
+        type: 'tool_call',
+        key: `tool-${block.id}`,
+        name: displayToolName(block.name),
+        input: block.input,
+        status: toolResult
+          ? toolResult.is_error
+            ? 'failed'
+            : 'done'
+          : streaming
+            ? 'wip'
+            : 'failed',
+        ...(toolResult
+          ? {
+              result: toolResult.content,
+              isError: toolResult.is_error,
+              elapsedMs: toolResult.elapsedMs,
+            }
+          : {}),
+      })
+      return
+    }
+    if (block.type === 'tool_result') {
+      // 结果已在对应的调用步骤上展示
       return
     }
     if (block.type !== 'server_tool_use') {

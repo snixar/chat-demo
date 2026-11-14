@@ -1,10 +1,13 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
-import type { ChatModel, CreateMessageRequest } from '../api/types.js'
+import type { ChatModel, CreateMessageRequest, MessageParam } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
+import { useMcp } from '../mcp/store.js'
+import { resetNewChatMcp, useNewChatMcp } from '../../components/chatInput/newChatMcp.js'
+import { callTool, loadAllTools, toCustomTools } from '../mcp/tools.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -20,13 +23,16 @@ import {
   canContinueReply,
   getContextRounds,
   settleReply,
+  toAssistantParam,
   toRequestMessages,
+  toToolResultParams,
 } from './reply.js'
 import {
   toSessionSummary,
   type AssistantMessage,
   type FileAttachment,
   type Message,
+  type ReplyBlock,
   type Session,
   type SessionSummary,
   type UserMessage,
@@ -34,6 +40,8 @@ import {
 
 /** deepseek-flash 同时支持深度思考与图片输入 */
 const MODEL: ChatModel = 'deepseek-flash'
+/** 一次提问里最多允许的 MCP 工具往返轮次，防止模型陷入反复调用 */
+const MAX_TOOL_ROUNDS = 6
 /** 所有生成请求统一携带的助手身份说明 */
 const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
@@ -570,6 +578,8 @@ export const sendMessage = (targetSessionId: string | null) => {
       updatedAt: now,
       messages: [],
       rootMessageId: null,
+      // 欢迎页里提前选好的 MCP 服务器，随会话一起保存
+      mcpServerIds: useNewChatMcp.getState().serverIds ?? undefined,
     }
     sessionId = session.id
     touchSession(session.id)
@@ -611,6 +621,7 @@ export const sendMessage = (targetSessionId: string | null) => {
   }
   persist(sessionId)
   clearSentDraft(targetSessionId)
+  resetNewChatMcp()
   void streamReply(sessionId, reply, { history, question })
   return true
 }
@@ -672,6 +683,38 @@ export const editMessage = (sessionId: string, messageId: string, content: strin
   persist(sessionId)
   void streamReply(sessionId, reply, { history: path.slice(0, index), question })
   return true
+}
+
+/**
+ * 切换某个 MCP 服务器在本会话里的启用状态。
+ * 新建的空会话还没有记录时，先从默认值（全部启用）展开再改。
+ */
+export const toggleSessionServer = (sessionId: string, serverId: string, enabled: boolean) => {
+  if (get().importingHistory || deletingSessions.has(sessionId)) {
+    return
+  }
+  const session = getSession(sessionId)
+  if (!session) {
+    return
+  }
+  const current = session.mcpServerIds
+  if (current === undefined) {
+    // 尚未自定义：以全部已启用服务器为初始集合
+    const all = useMcp
+      .getState()
+      .servers.filter((item) => item.enabled)
+      .map((item) => item.id)
+    const next = enabled ? all : all.filter((id) => id !== serverId)
+    updateSession(sessionId, (item) => ({ ...item, mcpServerIds: next }))
+  } else {
+    updateSession(sessionId, (item) => ({
+      ...item,
+      mcpServerIds: enabled
+        ? [...new Set([...current, serverId])]
+        : current.filter((id) => id !== serverId),
+    }))
+  }
+  persist(sessionId)
 }
 
 export const selectMessageVersion = (sessionId: string, messageId: string) => {
@@ -958,6 +1001,10 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
  * 请求并消费流：先补齐附件的 serverId，再发请求；流式增量按动画帧刷新内存，完成、失败或停止后落盘。
  * 补传失败时回复记为 upload 错误，可重试。
  * 服务端判定 file_id 失效时重新补传后重发，退避重试且次数有上限，超过则按原始报错收尾。
+ *
+ * 模型返回 stop_reason: tool_use 时执行客户端（MCP）工具，把结果作为下一条 user 消息续上再请求一次，
+ * 最多 MAX_TOOL_ROUNDS 轮。每轮的 assistant 与其 tool_result 按顺序累积到 toolTranscript，
+ * 保证协议要求的配对顺序。
  */
 const streamReply = async (sessionId: string, initial: AssistantMessage, request: Request) => {
   const controller = new AbortController()
@@ -974,110 +1021,179 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
   }
   streamFlushes.set(sessionId, flush)
 
+  /** 已完成的工具轮次，按 assistant + tool_result 成对保存，续接在提问之后 */
+  const toolTranscript: MessageParam[] = []
+  /** 本轮请求可用的 MCP 工具；为空时不声明客户端工具 */
+  let toolList: ReturnType<typeof toCustomTools> = []
+
   try {
-    for (let attempt = 0; ; attempt += 1) {
-      /** 附件补齐前出错属于上传失败，请求还没有发出 */
-      let preparing = true
-      let receivedContent = false
-      try {
-        const prepared = await prepareFiles(sessionId, request, controller.signal)
-        preparing = false
-        // 附件就绪后获取本轮信息；续写沿用原回答快照，重新生成的快照独立保存。
-        const latestReminder = prepared.prefix
-          ? prepared.prefix.latestReminder
-          : createLatestReminder(useSettings.getState())
-        reply = { ...reply, latestReminder }
-        updateReply(sessionId, reply)
-        persist(sessionId)
-        const messages = toRequestMessages(
-          prepared.history,
-          prepared.question,
-          prepared.prefix,
-          initial.thinking ?? false,
-          latestReminder
-        )
-        const events = streamMessage(
-          useSettings.getState().apiKey ?? '',
-          {
-            model: initial.model ?? MODEL,
-            system: SYSTEM_PROMPT,
-            messages,
-            thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
-            safety_check: SAFETY_CHECK,
-            tools: serverTools(initial.search ?? false),
-            ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
-          },
-          controller.signal
-        )
-        const blockIndexes = new Map<number, number>()
-        for await (const event of events) {
-          receivedContent ||= event.type === 'content_block_start'
-          if (
-            event.type === 'message_delta' &&
-            (event.delta.stop_reason === 'end_turn' || event.delta.stop_reason === 'max_tokens') &&
-            event.delta.title?.trim() &&
-            titleRequests.has(controller) &&
-            !controller.signal.aborted &&
-            !get().importingHistory
-          ) {
-            const title = event.delta.title.trim()
-            updateSession(sessionId, (session) => (session.title ? session : { ...session, title }))
-            titleRequests.delete(controller)
+    // 附件只需补齐一次：后续工具轮次复用同样的文件引用
+    let prepared: Request
+    try {
+      prepared = await prepareFiles(sessionId, request, controller.signal)
+    } catch (error) {
+      // 附件补齐前出错属于上传失败，请求还没有发出，可单独重试
+      if (controller.signal.aborted) {
+        throw error
+      }
+      reply = settleReply(reply, 'error', Date.now(), {
+        kind: 'upload',
+        message: '',
+        localMessage: describeUploadError(error),
+        retryable: isRetryableApiError(error),
+      })
+      return
+    }
+    const latestReminder = prepared.prefix
+      ? prepared.prefix.latestReminder
+      : createLatestReminder(useSettings.getState())
+    reply = { ...reply, latestReminder }
+    updateReply(sessionId, reply)
+    persist(sessionId)
+
+    {
+      // 会话级开关：mcpServerIds 为 undefined 时用全部已启用的服务器
+      const sessionServers = getSession(sessionId)?.mcpServerIds
+      const { tools } = await loadAllTools(sessionServers)
+      toolList = toCustomTools(tools)
+    }
+    controller.signal.throwIfAborted()
+
+    for (let turn = 0; ; turn += 1) {
+      const baseMessages = toRequestMessages(
+        prepared.history,
+        prepared.question,
+        turn === 0 ? prepared.prefix : undefined,
+        initial.thinking ?? false,
+        latestReminder
+      )
+      /** 本轮请求新增的块从已有块数开始，用于切出这一轮的 assistant 内容 */
+      const roundStart = reply.blocks.length
+
+      for (let attempt = 0; ; attempt += 1) {
+        let receivedContent = false
+        try {
+          const events = streamMessage(
+            useSettings.getState().apiKey ?? '',
+            {
+              model: initial.model ?? MODEL,
+              system: SYSTEM_PROMPT,
+              messages: [...baseMessages, ...toolTranscript],
+              thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
+              safety_check: SAFETY_CHECK,
+              tools: [...serverTools(initial.search ?? false), ...toolList],
+              ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
+            },
+            controller.signal
+          )
+          const blockIndexes = new Map<number, number>()
+          for await (const event of events) {
+            receivedContent ||= event.type === 'content_block_start'
+            if (
+              event.type === 'message_delta' &&
+              (event.delta.stop_reason === 'end_turn' ||
+                event.delta.stop_reason === 'max_tokens') &&
+              event.delta.title?.trim() &&
+              titleRequests.has(controller) &&
+              !controller.signal.aborted &&
+              !get().importingHistory
+            ) {
+              const title = event.delta.title.trim()
+              updateSession(sessionId, (session) =>
+                session.title ? session : { ...session, title }
+              )
+              titleRequests.delete(controller)
+            }
+            reply = applyEvent(reply, event, Date.now(), blockIndexes)
+            if (document.visibilityState === 'hidden') {
+              flush()
+            } else {
+              frame ||= requestAnimationFrame(flush)
+            }
           }
-          reply = applyEvent(reply, event, Date.now(), blockIndexes)
-          if (document.visibilityState === 'hidden') {
-            flush()
-          } else {
-            frame ||= requestAnimationFrame(flush)
-          }
-        }
-        reply = settleReply(reply, 'done', Date.now())
-        break
-      } catch (error) {
-        if (controller.signal.aborted) {
-          reply = settleReply(reply, 'stopped', Date.now())
+          reply = settleReply(reply, 'done', Date.now())
           break
-        }
-        if (preparing) {
-          reply = settleReply(reply, 'error', Date.now(), {
-            kind: 'upload',
-            message: '',
-            localMessage: describeUploadError(error),
-            retryable: isRetryableApiError(error),
-          })
-          break
-        }
-        // 附件失效：重新补传后重发。收到过内容块（含丢弃的客户端工具）后不自动重发。
-        if (
-          attempt < FILE_RETRY_LIMIT &&
-          !receivedContent &&
-          reuploadInvalidatedFiles(sessionId, request, error)
-        ) {
-          await waitForRetry(attempt, controller.signal)
+        } catch (error) {
           if (controller.signal.aborted) {
             reply = settleReply(reply, 'stopped', Date.now())
             break
           }
-          continue
+          // 附件失效：重新补传后重发。收到过内容块后不自动重发。
+          if (
+            attempt < FILE_RETRY_LIMIT &&
+            !receivedContent &&
+            reuploadInvalidatedFiles(sessionId, request, error)
+          ) {
+            await waitForRetry(attempt, controller.signal)
+            if (controller.signal.aborted) {
+              reply = settleReply(reply, 'stopped', Date.now())
+            }
+            continue
+          }
+          if (error instanceof ApiError && error.kind === 'interrupted' && reply.stopReason) {
+            // 已收到 message_delta 的结束原因，只是缺了结尾的 message_stop
+            reply = settleReply(reply, 'done', Date.now())
+          } else if (error instanceof ApiError) {
+            reply = settleReply(reply, 'error', Date.now(), {
+              kind: error.kind,
+              message: error.message,
+              status: error.status,
+              localMessage: error.localMessage,
+            })
+          } else {
+            reply = settleReply(reply, 'error', Date.now(), {
+              kind: 'protocol',
+              message: error instanceof Error ? error.message : String(error),
+            })
+          }
+          break
         }
-        if (error instanceof ApiError && error.kind === 'interrupted' && reply.stopReason) {
-          // 已收到 message_delta 的结束原因，只是缺了结尾的 message_stop
-          reply = settleReply(reply, 'done', Date.now())
-        } else if (error instanceof ApiError) {
-          reply = settleReply(reply, 'error', Date.now(), {
-            kind: error.kind,
-            message: error.message,
-            status: error.status,
-            localMessage: error.localMessage,
-          })
-        } else {
-          reply = settleReply(reply, 'error', Date.now(), {
-            kind: 'protocol',
-            message: error instanceof Error ? error.message : String(error),
-          })
-        }
+      }
+
+      flush()
+      persist(sessionId)
+      if (controller.signal.aborted || reply.status === 'error') {
         break
       }
+
+      // 只在本轮确实产生了待执行的工具调用时继续；达到轮次上限就按当前结果收尾
+      const pending = reply.blocks.slice(roundStart).filter((block) => block.type === 'tool_use')
+      if (pending.length === 0) {
+        break
+      }
+      if (turn + 1 >= MAX_TOOL_ROUNDS) {
+        break
+      }
+
+      const roundBlocks = reply.blocks.slice(roundStart)
+      const roundReply = { ...reply, blocks: roundBlocks }
+      reply = await executeToolCalls(sessionId, reply, roundBlocks, controller.signal)
+      flush()
+      persist(sessionId)
+      if (controller.signal.aborted) {
+        reply = settleReply(reply, 'stopped', Date.now())
+        break
+      }
+      // 本轮 assistant（含 tool_use）与其结果配对后进入下一轮的上下文。
+      // 结果块是 executeToolCalls 追加的，因此要取执行后的切片。
+      const resultBlocks = reply.blocks.slice(roundStart)
+      toolTranscript.push(toAssistantParam(roundReply), ...toToolResultParams(resultBlocks))
+    }
+  } catch (error) {
+    if (controller.signal.aborted) {
+      reply = settleReply(reply, 'stopped', Date.now())
+    } else if (error instanceof ApiError) {
+      reply = settleReply(reply, 'error', Date.now(), {
+        kind: error.kind,
+        message: error.message,
+        status: error.status,
+        localMessage: error.localMessage,
+      })
+    } else {
+      reply = settleReply(reply, 'error', Date.now(), {
+        kind: 'protocol',
+        message: error instanceof Error ? error.message : String(error),
+      })
     }
   } finally {
     titleRequests.delete(controller)
@@ -1091,4 +1207,48 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     }))
     persist(sessionId)
   }
+}
+
+/**
+ * 执行一轮里所有待办的客户端工具调用，把结果写进回复。
+ * 单个工具失败不影响其他工具：错误作为 is_error 的结果回传，模型能据此调整。
+ */
+const executeToolCalls = async (
+  sessionId: string,
+  reply: AssistantMessage,
+  roundBlocks: ReplyBlock[],
+  signal: AbortSignal
+): Promise<AssistantMessage> => {
+  const calls = roundBlocks.filter((block) => block.type === 'tool_use')
+  const results: ReplyBlock[] = []
+  for (const call of calls) {
+    if (signal.aborted) {
+      break
+    }
+    const startedAt = Date.now()
+    let content: string
+    let isError = false
+    try {
+      content = await callTool(call.name, call.input, signal)
+    } catch (error) {
+      isError = true
+      content = error instanceof Error ? error.message : String(error)
+    }
+    if (signal.aborted) {
+      break
+    }
+    results.push({
+      type: 'tool_result',
+      tool_use_id: call.id,
+      content,
+      is_error: isError,
+      elapsedMs: Date.now() - startedAt,
+    })
+  }
+  if (results.length === 0) {
+    return reply
+  }
+  const next = { ...reply, blocks: [...reply.blocks, ...results] }
+  updateReply(sessionId, next)
+  return next
 }

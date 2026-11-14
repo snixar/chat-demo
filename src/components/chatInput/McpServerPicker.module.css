@@ -1,0 +1,187 @@
+/* MCP 服务器选择页：分段式列表项，与 rikkahub 的 SegmentedListItem 一致 */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 4px;
+  background-color: var(--dsw-alias-bg-base);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 首尾项用大圆角 */
+.first {
+  border-radius: 16px 16px 4px 4px;
+}
+
+.last {
+  border-radius: 4px 4px 16px 16px;
+}
+
+.first.last {
+  border-radius: 16px;
+}
+
+.item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.item:not(:disabled):active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+@media (hover: hover) {
+  .item:not(:disabled):hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.leading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 28px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 连接中的转圈 */
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--dsw-alias-border-l3);
+  border-top-color: var(--dsw-alias-brand-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 工具数标签，对应 rikkahub 的 Tag(INFO) */
+.tag {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* 状态说明，对应 supportingContent */
+.status {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-tertiary);
+  word-break: break-word;
+}
+
+.statusError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.trailing {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 28px;
+}
+
+/* 开关只反映状态，点击由整行处理 */
+.switch {
+  position: relative;
+  display: block;
+  width: 46px;
+  height: 28px;
+  border: 2px solid var(--dsw-alias-label-secondary);
+  border-radius: 14px;
+  transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--dsw-alias-label-secondary);
+  transform: translateY(-50%);
+  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.switchOn {
+  border-color: var(--dsw-alias-brand-primary);
+  background-color: var(--dsw-alias-brand-primary);
+}
+
+.switchOn::after {
+  background-color: #fff;
+  /* 轨道 46px、边框 2px、圆点 16px、左右各 4px → 位移 46-4-16-4-4 = 18px */
+  transform: translate(18px, -50%);
+}
+
+/* 空状态 */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.emptyHint {
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}

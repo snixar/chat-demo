@@ -142,6 +142,18 @@ public final class BlobBridge {
                 "window.__androidOpenBlob && window.__androidOpenBlob(" + jsString(url) + ")", null));
     }
 
+    /** 拍照：拉起系统相机，结果通过 __androidPickedFile 回传 */
+    @JavascriptInterface
+    public void takePhoto(String requestId) {
+        activity.runOnUiThread(() -> ((MainActivity) activity).startCamera(requestId));
+    }
+
+    /** 相册：拉起系统图片选择器 */
+    @JavascriptInterface
+    public void pickImage(String requestId) {
+        activity.runOnUiThread(() -> ((MainActivity) activity).startGallery(requestId));
+    }
+
     /** 深色模式下同步系统栏配色 */
     @JavascriptInterface
     public void setTheme(boolean dark) {

@@ -69,3 +69,18 @@ android/
 - 不包含 AndroidX，因此没有 `FileProvider`、SplashScreen API 等；文件投递用自写的最小 `ContentProvider`。
 - 只有 arm64 / x86 通用的 Java 代码，APK 不含 native 库，可在任意 ABI 安装。
 - `allowBackup=false`：会话数据只存在于设备上，迁移请用设置里的导出 / 导入。
+
+## MCP 支持
+
+设置 → 扩展 → MCP 服务器可添加外部 MCP 服务器，支持两种传输：
+
+| 传输 | 说明 |
+| --- | --- |
+| Streamable HTTP | 所有消息 POST 到同一 endpoint，响应可为 JSON 或 SSE 流（2025-03-26 推荐） |
+| SSE | 先 GET 建立长连接，服务端用 `endpoint` 事件给出 POST 地址（2024-11-05 旧方式） |
+
+工具会以 `mcp__<serverId>__<toolName>` 的名字声明给模型；模型返回 `tool_use` 后由页面执行，结果作为 `tool_result` 回传，模型继续生成，最多 6 轮。
+
+`HttpBridge` 用原生 `HttpURLConnection` 代发请求：浏览器 `fetch` 受同源策略约束，而 MCP 服务器通常不返回 CORS 头；APK 也默认禁止明文 `http://`。原生桥同时支持流式推送，SSE 长连接因此可用。`network_security_config.xml` 仅对 `localhost`、`127.0.0.1`、`10.0.2.2` 放开明文，主 API 仍强制 HTTPS。
+
+测试连接会真正握手并列出工具；连不上的服务器不影响对话，只是这轮没有对应工具。
