@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与前端 theme.css 的 neutral bluish 00 / 1000 保持一致 -->
+    <color name="app_window_background">#FFFFFFFF</color>
+    <color name="app_window_background_dark">#FF151517</color>
+</resources>

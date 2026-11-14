@@ -52,3 +52,15 @@ body.change-theme *::after {
     overscroll-behavior-y: none;
   }
 }
+
+/* 原生壳：WebView 全屏绘制到系统栏下方，用安全区分隔刘海与手势条 */
+body.is-native-app {
+  --app-safe-top: env(safe-area-inset-top, 0px);
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+body.is-native-app #root {
+  padding-top: var(--app-safe-top);
+  padding-bottom: var(--app-safe-bottom);
+  box-sizing: border-box;
+}

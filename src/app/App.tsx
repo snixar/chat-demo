@@ -10,7 +10,7 @@ import {
   useChatStore,
 } from '../services/chat/store.js'
 import { SearchPanel } from '../components/search/SearchPanel.js'
-import { closeSearchPanel } from '../components/search/searchPanelState.js'
+import { closeSearchPanel, useSearchPanel } from '../components/search/searchPanelState.js'
 import { SessionView } from '../components/session/SessionView.js'
 import { MobileHeader } from '../components/session/MobileHeader.js'
 import { Welcome } from '../components/session/Welcome.js'
@@ -22,8 +22,10 @@ import { onUploadNotice } from '../services/attachments.js'
 import { Button } from '../components/base/Button.js'
 import { stopReadAloud } from '../services/speech/readAloud.js'
 import { CollapsedSider } from '../components/sider/CollapsedSider.js'
-import { closeMobileSider } from '../components/sider/mobileSiderState.js'
+import { closeMobileSider, useMobileSider } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
+import { closeTopModal } from '../components/base/Modal.js'
+import { bindNativeBack, bindNativeBlobOpener } from '../services/native.js'
 import styles from './App.module.css'
 
 export const App = () => {
@@ -66,6 +68,27 @@ export const App = () => {
   useEffect(stopReadAloud, [activeId])
   // 移动端选中会话、切换布局后收起抽屉
   useEffect(closeMobileSider, [activeId, isMobile])
+
+  // 原生壳：返回键逐层关闭浮层，没有可关的才退出；blob: 地址交给原生保存/打开
+  useEffect(bindNativeBlobOpener, [])
+  useEffect(
+    () =>
+      bindNativeBack(() => {
+        if (closeTopModal()) {
+          return true
+        }
+        if (useSearchPanel.getState().entry !== null) {
+          closeSearchPanel()
+          return true
+        }
+        if (useMobileSider.getState().open) {
+          closeMobileSider()
+          return true
+        }
+        return false
+      }),
+    []
+  )
 
   useEffect(() => {
     void initChat()

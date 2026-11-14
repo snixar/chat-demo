@@ -66,9 +66,15 @@ src/
     api/               API requests, SSE, and protocol types
     chat/              Conversations, message branches, storage, and history import/export
     markdown/          Markdown parsing, syntax highlighting, and diagrams
+    native.ts          Hooks for the Android WebView shell (no-ops in a browser)
     speech/            Audio recording and read-aloud playback
   utils/               Shared utilities
+android/               Native Android shell and APK build script
 ```
+
+## Android app
+
+`android/` wraps the built site in a single-Activity WebView shell, producing an installable APK without Gradle or AndroidX. See [android/README.md](android/README.md) for requirements, the build command, and how the shell handles storage, downloads, and the back button.
 
 ## License
 

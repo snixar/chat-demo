@@ -7,7 +7,14 @@ import { IconButton } from './IconButton.js'
 import styles from './Modal.module.css'
 
 /** 当前打开的弹窗，后打开的在末尾；叠放时 Esc 只关闭最上层 */
-const openModals: object[] = []
+const openModals: (() => void)[] = []
+
+/** 关闭最上层弹窗，返回是否有弹窗被关闭；原生返回键优先调用 */
+export const closeTopModal = () => {
+  const close = openModals.at(-1)
+  close?.()
+  return close !== undefined
+}
 
 /** 遮罩 + 居中卡片，Esc / 点遮罩关闭 */
 export const Modal = ({
@@ -34,7 +41,7 @@ export const Modal = ({
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   useEffect(() => {
-    const token = {}
+    const token = () => onCloseRef.current()
     openModals.push(token)
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && openModals.at(-1) === token) {

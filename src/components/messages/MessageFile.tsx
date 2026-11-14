@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
 import { useUploads } from '../../services/attachments.js'
 import { loadFile } from '../../services/chat/db.js'
+import { isNativeApp, openBlob } from '../../services/native.js'
 import type { FileAttachment } from '../../services/chat/types.js'
 import { IconPhotoErrorFill20, IconRefreshOutline16 } from '../base/icons.js'
 import { Tooltip } from '../base/Tooltip.js'
@@ -142,6 +143,13 @@ export const MessageFile = ({
         target="_blank"
         rel="noreferrer"
         title={file.name}
+        onClick={(event) => {
+          // 原生壳无法直接打开 blob: 地址，交给系统查看器
+          if (isNativeApp()) {
+            event.preventDefault()
+            void openBlob(url, file.name)
+          }
+        }}
       >
         {preview}
       </a>
@@ -158,7 +166,7 @@ export const MessageFile = ({
       status={uploading ? 'uploading' : failed ? 'error' : 'done'}
       error={errorText}
       onRetry={retry ?? undefined}
-      onOpen={url && !upload ? () => window.open(url, '_blank', 'noreferrer') : undefined}
+      onOpen={url && !upload ? () => void openBlob(url, file.name) : undefined}
     />
   )
 }

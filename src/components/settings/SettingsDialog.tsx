@@ -16,6 +16,7 @@ import {
   importHistory,
 } from '../../services/chat/backup.js'
 import { useIsMobile } from '../../app/viewport.js'
+import { saveBlob } from '../../services/native.js'
 import { useChatStore } from '../../services/chat/store.js'
 import { regionCodes, getRegionName, provinces } from '../../services/location.js'
 import {
@@ -524,12 +525,8 @@ const ExportHistory = ({ disabled }: { disabled: boolean }) => {
     setStatus(null)
     try {
       const { name, blob } = await exportHistory()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = name
-      link.click()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      // 原生壳无法下载 blob: 地址，交给系统保存位置选择器
+      await saveBlob(blob, name)
     } catch (error) {
       setStatus(errorStatus('historyExportFailed', error))
     } finally {

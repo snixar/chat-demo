@@ -9,3 +9,8 @@ build/
 .env.*
 !.env.example
 tmp/
+
+# 打包工具链产物与签名库（签名库不可提交：签名变更后升级会失败）
+android/build/
+android/assets/
+android/.keystore/

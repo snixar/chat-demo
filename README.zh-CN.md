@@ -45,13 +45,14 @@ API Key 和设置保存在浏览器 localStorage，会话及附件原件保存�
 
 ## 开发
 
-| 命令          | 用途                |
-| ------------- | ------------------- |
-| `pnpm dev`    | 启动开发服务器      |
-| `pnpm build`  | 构建到 `dist/`      |
-| `pnpm type`   | TypeScript 类型检查 |
-| `pnpm lint`   | oxlint 检查         |
-| `pnpm format` | oxfmt 格式化        |
+| 命令           | 用途                |
+| -------------- | ------------------- |
+| `pnpm dev`     | 启动开发服务器      |
+| `pnpm build`   | 构建到 `dist/`      |
+| `pnpm type`    | TypeScript 类型检查 |
+| `pnpm lint`    | oxlint 检查         |
+| `pnpm format`  | oxfmt 格式化        |
+| `pnpm android` | 构建 Android APK    |
 
 [rspack.config.ts](rspack.config.ts) 默认连接 `https://api.deepseek.com`。`createConfig({ apiOrigin, devServer })` 支持自定义 API 地址和开发服务器代理。
 
@@ -66,9 +67,15 @@ src/
     api/               API 请求、SSE 与协议类型
     chat/              会话、消息分支、本地存储与历史导入导出
     markdown/          Markdown 解析、代码高亮与图表
+    native.ts          Android WebView 壳的适配层（浏览器中为空实现）
     speech/            录音与朗读
   utils/               通用工具
+android/               Android 原生壳与 APK 构建脚本
 ```
+
+## Android 应用
+
+`android/` 把构建产物包进单 Activity 的 WebView 壳，直接产出可安装的 APK，不依赖 Gradle 与 AndroidX。构建环境、命令，以及存储、下载、返回键的处理方式见 [android/README.md](android/README.md)。
 
 ## 许可证
 
