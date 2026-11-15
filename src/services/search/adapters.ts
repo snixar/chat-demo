@@ -29,6 +29,38 @@ const num = (value: unknown): number | undefined =>
 
 const arr = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
 
+/**
+ * 单次搜索 / 抓取请求的超时。
+ *
+ * 原生桥自己有连接与读超时，浏览器的 fetch 没有：第三方服务挂住时，
+ * 整个工具轮次会一直卡到用户手动停止。这里统一给一个上限。
+ */
+const REQUEST_TIMEOUT_MS = 30_000
+
+/**
+ * 把调用方的中止信号与超时合并：任一触发即中止。
+ * AbortSignal.any 在目标浏览器版本里不可用，手工接线。
+ */
+const withTimeout = (signal: AbortSignal): AbortSignal => {
+  const merged = new AbortController()
+  const onAbort = () => merged.abort(signal.reason)
+  if (signal.aborted) {
+    merged.abort(signal.reason)
+  } else {
+    signal.addEventListener('abort', onAbort, { once: true })
+  }
+  const timer = setTimeout(() => merged.abort(new Error('request timed out')), REQUEST_TIMEOUT_MS)
+  merged.signal.addEventListener(
+    'abort',
+    () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+    },
+    { once: true }
+  )
+  return merged.signal
+}
+
 /** 发一次 JSON 请求，非 2xx 时尽量取出服务端的错误说明 */
 const requestJson = async (
   url: string,
@@ -52,7 +84,7 @@ const requestJson = async (
       ...headers,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    signal,
+    signal: withTimeout(signal),
   })
   const text = await response.text().catch(() => '')
   if (!response.ok) {
@@ -116,11 +148,6 @@ type ScrapeContext = {
   url: string
   signal: AbortSignal
 }
-
-const SEARCH_QUERY_DESCRIPTION =
-  'Concise search keywords, not a full sentence. Write them in the language the best sources are written in.'
-
-export { SEARCH_QUERY_DESCRIPTION }
 
 /* ---- DeepSeek ---- */
 
@@ -767,8 +794,13 @@ const fetchHtml = async (
   signal: AbortSignal
 ): Promise<{ ok: boolean; status: number; text: string }> => {
   let current = url
+  // 每一跳都带超时：5 跳重定向串起来的总耗时也需要有界。
   for (let hop = 0; hop < 5; hop++) {
-    const response = await nativeFetch(current, { method: 'GET', headers, signal })
+    const response = await nativeFetch(current, {
+      method: 'GET',
+      headers,
+      signal: withTimeout(signal),
+    })
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('Location')
       if (!location) {

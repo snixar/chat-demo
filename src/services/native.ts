@@ -103,10 +103,34 @@ export const saveBlob = async (blob: Blob, name: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
-/** 浏览器里新标签打开；原生壳交给系统查看器 */
+/**
+ * 浏览器里可以直接在标签页打开的类型：位图与 PDF。
+ * SVG 虽然是图片，但作为顶层文档会执行其中脚本，必须走下载；
+ * HTML / JS / 其他文档同理。见 openBlob 的同源说明。
+ */
+const INLINE_OPENABLE = /^(image\/(png|jpeg|gif|webp|bmp|avif|tiff)|application\/pdf)$/i
+
+/**
+ * 浏览器里新标签打开；原生壳交给系统查看器。
+ *
+ * blob: 地址继承创建者的源，若把用户上传的 HTML/SVG 直接 window.open，
+ * 它会在本应用的源上执行脚本，读到 localStorage 里的 API Key。
+ * 因此只有位图和 PDF 才内联打开，其余类型一律改为下载。
+ */
 export const openBlob = async (url: string, name = 'attachment') => {
   if (!bridge()) {
-    window.open(url, '_blank', 'noreferrer')
+    let blob: Blob
+    try {
+      blob = await (await fetch(url)).blob()
+    } catch {
+      // 读取失败时保持原样，不做提示：原件缺失时界面已有占位
+      return
+    }
+    if (INLINE_OPENABLE.test(blob.type)) {
+      window.open(url, '_blank', 'noreferrer')
+      return
+    }
+    await saveBlob(blob, name)
     return
   }
   try {

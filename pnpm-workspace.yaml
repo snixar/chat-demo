@@ -1,0 +1,5 @@
+# mermaid 与 micromark-extension-llm-math 各自把 katex 锁在 ^0.16/^0.18，
+# 会在产物里带上两个版本（其中 0.16.x 命中 GHSA-238p-pmpm-9mq7）。
+# 统一到仓库直接依赖的 0.18.11，避免重复打包并消除该告警。
+overrides:
+  katex: 0.18.11

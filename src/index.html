@@ -4,6 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#ffffff" />
+    <!--
+      纵深防御：渲染层已对外链做协议白名单（utils/url.ts），这里再限制一遍资源与脚本来源。
+      script-src 不含 'unsafe-inline'，因此 javascript: 链接与注入的内联脚本都无法执行；
+      style-src 必须放开 'unsafe-inline'，Mermaid 的 SVG 与 KaTeX 依赖内联样式。
+      connect-src 需要放开 http(s)，因为 API、MCP 服务器与搜索服务都由用户在设置里自填地址。
+      file: 用于直接双击 dist/index.html 的使用方式。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: https: http:; font-src 'self' file: data:; connect-src 'self' file: https: http:; media-src 'self' file: data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>DeepSleep</title>
   </head>
   <body>

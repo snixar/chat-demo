@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useTranslate } from '../../i18n/index.js'
 import { useUploads } from '../../services/attachments.js'
 import { loadFile } from '../../services/chat/db.js'
-import { isNativeApp, openBlob } from '../../services/native.js'
+import { openBlob } from '../../services/native.js'
 import type { FileAttachment } from '../../services/chat/types.js'
 import { IconPhotoErrorFill20, IconRefreshOutline16 } from '../base/icons.js'
 import { Tooltip } from '../base/Tooltip.js'
@@ -135,7 +135,8 @@ export const MessageFile = ({
       )
     }
 
-    // 正常态：链接到原件
+    // 正常态：点击查看原件。统一走 openBlob：浏览器里位图内联打开、其余类型下载，
+    // 原生壳交给系统查看器。SVG 的 blob: 地址若直接当链接打开，会在本应用的源上执行脚本。
     return url ? (
       <a
         className={clsx(styles.image, styles.imageThumb)}
@@ -144,11 +145,8 @@ export const MessageFile = ({
         rel="noreferrer"
         title={file.name}
         onClick={(event) => {
-          // 原生壳无法直接打开 blob: 地址，交给系统查看器
-          if (isNativeApp()) {
-            event.preventDefault()
-            void openBlob(url, file.name)
-          }
+          event.preventDefault()
+          void openBlob(url, file.name)
         }}
       >
         {preview}

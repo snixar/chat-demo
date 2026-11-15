@@ -12,10 +12,11 @@
     "lint": "oxlint src rspack.config.ts",
     "format": "oxfmt --write .",
     "android": "./android/build.sh",
-    "android:debug": "./android/build.sh --debug"
+    "android:debug": "./android/build.sh --debug",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "pnpm type && pnpm lint && pnpm test"
   },
   "dependencies": {
-    "@types/katex": "^0.16.5",
     "@types/mdast": "~4.0.3",
     "@types/prismjs": "^1.26.1",
     "@types/react": "~18.3.1",
@@ -23,12 +24,12 @@
     "clsx": "2.1.1",
     "fflate": "0.8.3",
     "idb": "8.0.3",
-    "katex": "0.16.22",
+    "katex": "0.18.11",
     "mdast-util-find-and-replace": "3.0.2",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm": "3.1.0",
     "mdast-util-math": "3.0.0",
-    "mermaid": "11.10.1",
+    "mermaid": "11.17.2",
     "micromark-extension-gfm": "3.0.0",
     "micromark-extension-llm-math": "3.1.0",
     "prismjs": "1.30.0",
