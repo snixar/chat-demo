@@ -32,11 +32,41 @@ type NativeHead = {
 
 let requestSeq = 0
 
+/**
+ * 等待原生侧回传响应头的上限。
+ * SSE 长连接本身可以持续很久，但「连响应头都拿不到」只可能是连接或桥出了问题，
+ * 必须有界，否则界面会停在「正在思考」而不给任何错误。
+ */
+const HEAD_TIMEOUT_MS = 90_000
+
+/**
+ * 流式响应静默多久算连接已死。
+ *
+ * 服务端在思考期间会定期发 ping / 注释保活，因此「一段时间内一个字节都没有」
+ * 只可能是连接断了而 read 循环没收到 EOF。给 5 分钟：足够覆盖长时间无输出的推理，
+ * 又不至于让用户无限等待。
+ */
+const STREAM_IDLE_TIMEOUT_MS = 300_000
+
 /** 流式请求的页面侧状态机 */
 type StreamState = {
   controller: ReadableStreamDefaultController<Uint8Array>
   encoder: TextEncoder
   closed: boolean
+  /** 最近一次收到数据的时间，用于静默超时判断 */
+  lastActivity: number
+  /** 静默看门狗定时器；流结束时统一清理 */
+  idleTimer?: ReturnType<typeof setInterval>
+}
+
+/** 结束一个流状态：清定时器并标记关闭，返回 state 供调用方收尾 */
+const closeStreamState = (id: string): StreamState | undefined => {
+  const state = streamStates.get(id)
+  streamStates.delete(id)
+  if (state) {
+    clearInterval(state.idleTimer)
+  }
+  return state
 }
 
 const streamStates = new Map<string, StreamState>()
@@ -48,11 +78,15 @@ const bridge = (): NativeBridge | undefined =>
 /** 是否可用原生 HTTP（APK 内为 true） */
 export const hasNativeHttp = () => bridge()?.request !== undefined
 
-/** 把原生回调挂到 window，只挂一次 */
+/**
+ * 把原生回调挂到 window。
+ *
+ * 必须每次都完整挂一遍：先前版本只用 __mcpFetchResult 判断「已挂过」，
+ * 一旦这个符号被外部（调试、注入脚本或旧版本残留）写过，其余四个钩子就永远不会
+ * 注册，流式响应只能收到响应头、收不到任何分片，界面会停在「正在思考」。
+ * 重复赋值是幂等的，成本可以忽略。
+ */
 const ensureHooks = () => {
-  if (window.__mcpFetchResult) {
-    return
-  }
   window.__mcpFetchResult = (id: string, payload: string) => {
     const resolve = resultWaiters.get(id)
     resultWaiters.delete(id)
@@ -71,6 +105,7 @@ const ensureHooks = () => {
     if (!state || state.closed) {
       return
     }
+    state.lastActivity = Date.now()
     try {
       state.controller.enqueue(state.encoder.encode(chunk))
     } catch {
@@ -78,8 +113,7 @@ const ensureHooks = () => {
     }
   }
   window.__mcpFetchEnd = (id: string) => {
-    const state = streamStates.get(id)
-    streamStates.delete(id)
+    const state = closeStreamState(id)
     if (state && !state.closed) {
       state.closed = true
       try {
@@ -90,8 +124,7 @@ const ensureHooks = () => {
     }
   }
   window.__mcpFetchError = (id: string, message: string) => {
-    const state = streamStates.get(id)
-    streamStates.delete(id)
+    const state = closeStreamState(id)
     if (state && !state.closed) {
       state.closed = true
       try {
@@ -138,14 +171,60 @@ const fetchStream = (native: NativeBridge, url: string, init: RequestInit) =>
     const encoder = new TextEncoder()
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        streamStates.set(requestId, { controller, encoder, closed: false })
+        streamStates.set(requestId, {
+          controller,
+          encoder,
+          closed: false,
+          lastActivity: Date.now(),
+        })
+        // 每秒检查一次是否长时间没有任何数据；判定为死连接后按错误结束流，
+        // 让上层的读取循环抛错，而不是无限 await。
+        const current = streamStates.get(requestId)
+        if (current) {
+          current.idleTimer = setInterval(() => {
+            const state = streamStates.get(requestId)
+            if (!state || state.closed) {
+              return
+            }
+            if (Date.now() - state.lastActivity < STREAM_IDLE_TIMEOUT_MS) {
+              return
+            }
+            streamStates.delete(requestId)
+            clearInterval(state.idleTimer)
+            state.closed = true
+            native.cancel?.(requestId)
+            try {
+              state.controller.error(new NativeHttpError('response stream stalled'))
+            } catch {
+              // 已关闭
+            }
+          }, 1000)
+        }
       },
       cancel() {
-        streamStates.delete(requestId)
+        closeStreamState(requestId)
         native.cancel?.(requestId)
       },
     })
+    /**
+     * 响应头看门狗：原生侧若因任何原因不再回调（连接卡死、桥被阻塞、
+     * 回调钩子未注册），这里必须主动失败，否则界面会永久停在「正在思考」
+     * 且没有任何错误提示。取 90s：慢模型的首字节也远早于此。
+     */
+    const headTimer = setTimeout(() => {
+      if (resultWaiters.delete(requestId)) {
+        native.cancel?.(requestId)
+        streamStates.delete(requestId)
+        try {
+          body.cancel().catch(() => {})
+        } catch {
+          // 流可能已经关闭
+        }
+        resolve({ head: { status: 0, statusText: 'no response headers (timeout)' }, body })
+      }
+    }, HEAD_TIMEOUT_MS)
     resultWaiters.set(requestId, (payload) => {
+      clearTimeout(headTimer)
       let head: NativeHead
       try {
         head = JSON.parse(payload) as NativeHead
@@ -157,6 +236,7 @@ const fetchStream = (native: NativeBridge, url: string, init: RequestInit) =>
     init.signal?.addEventListener(
       'abort',
       () => {
+        clearTimeout(headTimer)
         native.cancel?.(requestId)
         streamStates.delete(requestId)
         if (resultWaiters.delete(requestId)) {
