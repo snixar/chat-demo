@@ -65,6 +65,7 @@
     bottom: auto;
     flex-shrink: 0;
     margin: 0 auto;
-    padding-bottom: env(safe-area-inset-bottom);
+    /* 安全区为 0 时（无手势条）也要留出与 DeepSeek 一致的底边距 */
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
   }
 }

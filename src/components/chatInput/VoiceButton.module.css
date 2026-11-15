@@ -16,13 +16,14 @@
   }
 }
 
+/* 圆钮基座：对齐 DeepSeek，统一 36px 圆形 */
 .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -30,6 +31,7 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   outline: none;
+  touch-action: none;
   transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out);
 
   &:active:not(.recording):not(.disabled) {
@@ -44,6 +46,26 @@
 
   &:focus-visible {
     box-shadow: 0 0 0 2px var(--dsw-alias-button-primary-fill);
+  }
+}
+
+/* 发送态：品牌蓝实心圆 + 白色箭头（与 DeepSeek 一致） */
+.send {
+  background-color: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-static-neutral-bluish-00);
+
+  &:active:not(.disabled) {
+    background-color: var(--dsw-alias-button-primary-hover);
+  }
+
+  @media (hover: hover) {
+    &:hover:not(.disabled) {
+      background-color: var(--dsw-alias-button-primary-hover);
+    }
+  }
+
+  &.disabled {
+    opacity: 0.4;
   }
 }
 

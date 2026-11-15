@@ -6,7 +6,7 @@ import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/er
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
 import { useMcp } from '../mcp/store.js'
-import { resetNewChatMcp, useNewChatMcp } from '../../components/chatInput/newChatMcp.js'
+import { rememberNewChatServers, useNewChatMcp } from '../../components/chatInput/newChatMcp.js'
 import {
   callTool,
   clearLocalTools,
@@ -645,7 +645,8 @@ export const sendMessage = (targetSessionId: string | null) => {
   }
   persist(sessionId)
   clearSentDraft(targetSessionId)
-  resetNewChatMcp()
+  // 记住这次实际用的服务器集合，下一个新对话沿用（不要在发送后清空）
+  rememberNewChatServers(getSession(sessionId)?.mcpServerIds)
   void streamReply(sessionId, reply, { history, question })
   return true
 }

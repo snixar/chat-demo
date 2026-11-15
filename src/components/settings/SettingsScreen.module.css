@@ -253,16 +253,17 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 整宽输入框：形态同 rikkahub 的 OutlinedTextField（白底 + 描边） */
+/* 整宽输入框：胶囊状（全圆角），白底 + 描边 */
 .input {
   box-sizing: border-box;
   width: 100%;
   min-height: 52px;
   margin-top: 6px;
-  padding: 13px 14px;
+  /* 左右留够内边距，胶囊弧线才不会挤到文字 */
+  padding: 13px 22px;
   /* 页面本身是浅灰，输入框必须用白底 + 可见描边才能区分 */
   border: 1.5px solid var(--dsw-alias-border-l3);
-  border-radius: 12px;
+  border-radius: 999px;
   outline: none;
   background-color: var(--settings-card-bg);
   color: var(--dsw-alias-label-primary);
@@ -280,9 +281,11 @@
   color: var(--dsw-alias-label-caption);
 }
 
+/* 多行文本框：胶囊半径在换行时会挤压文字，保留常规圆角 */
 .textarea {
   min-height: 120px;
   padding: 14px 16px;
+  border-radius: 16px;
   resize: vertical;
   line-height: 22px;
 }
@@ -441,16 +444,16 @@
   background-color: var(--dsw-alias-state-error-primary);
 }
 
-/* 开关 */
+/* 开关：实心胶囊，关闭态灰底白点、开启态品牌色白点 */
 .switch {
   position: relative;
   flex-shrink: 0;
   width: 52px;
   height: 32px;
   padding: 0;
-  border: 2px solid var(--dsw-alias-label-secondary);
+  border: none;
   border-radius: 16px;
-  background-color: transparent;
+  background-color: var(--dsw-specific-selector);
   cursor: pointer;
   transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
@@ -460,16 +463,16 @@
   position: absolute;
   top: 50%;
   left: 4px;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background-color: var(--dsw-alias-label-secondary);
+  background-color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
   transform: translateY(-50%);
   transition: transform var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 .switchOn {
-  border-color: var(--dsw-alias-brand-primary);
   background-color: var(--dsw-alias-brand-primary);
 }
 

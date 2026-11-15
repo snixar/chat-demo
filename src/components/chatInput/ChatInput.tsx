@@ -2,8 +2,6 @@ import clsx from 'clsx'
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   IconGlobeLanguageOutline14,
-  IconSendOutline16,
-  IconStopFill16,
   IconThinkOutline14,
 } from '../base/icons.js'
 import { AttachmentSheet, useAttachmentPicker } from './AttachmentSheet.js'
@@ -137,6 +135,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   // 移动端录音时用频谱替代输入框内容
   const recording = voice.status === 'recording'
 
+  // 有文字就显示发送键，否则显示按住说话（与 DeepSeek 一致）
+  const hasText = text.trim().length > 0 || attachments.length > 0
+
   // 排队、上传中或上传失败的附件都留在输入框，全部上传成功后才能发送
   const canSend = !importingHistory && !streaming && voice.status === 'idle' && draftReady
 
@@ -174,7 +175,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         <textarea
           ref={textareaRef}
           className={clsx(styles.textarea, recording && isMobile && styles.textareaHidden)}
-          placeholder={t('chatInputPlaceholderChat')}
+          placeholder={hasText ? t('chatInputPlaceholderSend') : t('chatInputPlaceholderChat')}
           rows={2}
           // 移动端不自动聚焦，避免一打开就弹出键盘
           autoFocus={!isMobile}
@@ -236,19 +237,6 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           </Tooltip>
         </div>
         <div className={styles.right}>
-          <VoiceButton
-            status={voice.status}
-            disabled={!voice.available}
-            seconds={voice.seconds}
-            onClick={() => {
-              if (
-                voice.status !== 'idle' ||
-                (!useChatStore.getState().importingHistory && ensureApiKey())
-              ) {
-                void voice.toggle()
-              }
-            }}
-          />
           <IconButton
             size="m"
             tone="primary"
@@ -268,29 +256,34 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
               event.target.value = ''
             }}
           />
-          {streaming && sessionId ? (
-            <button
-              type="button"
-              className={styles.sendButton}
-              aria-label={t('chatInputStopButtonTooltip')}
-              onClick={() => {
+          {/*
+            右下角二合一圆钮（与 DeepSeek 一致）：
+            空输入按住说话、松手自动发送；有文字变发送键；生成中变停止键
+          */}
+          <VoiceButton
+            status={voice.status}
+            disabled={!voice.available}
+            seconds={voice.seconds}
+            mode={hasText ? 'send' : 'voice'}
+            streaming={streaming && sessionId !== null}
+            canSend={canSend}
+            recording={recording}
+            getAnalyser={voice.getAnalyser}
+            onStart={() => {
+              if (!useChatStore.getState().importingHistory && ensureApiKey()) {
+                void voice.start()
+              }
+            }}
+            onFinish={voice.finish}
+            onCancel={voice.cancel}
+            onSend={send}
+            onStop={() => {
+              if (sessionId) {
                 stopReadAloud()
                 stopReply(sessionId)
-              }}
-            >
-              <IconStopFill16 />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className={clsx(styles.sendButton, !canSend && styles.disabled)}
-              aria-label={t('send')}
-              aria-disabled={!canSend}
-              onClick={send}
-            >
-              <IconSendOutline16 />
-            </button>
-          )}
+              }
+            }}
+          />
         </div>
       </div>
       {dragging ? <DragMask /> : null}

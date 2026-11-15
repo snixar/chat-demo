@@ -47,7 +47,9 @@
     justify-content: flex-end;
     max-width: none;
     margin: 0;
-    padding: 0 16px env(safe-area-inset-bottom);
+    /* 对齐 DeepSeek：输入框与屏幕底边留有间距，不能贴死；
+       仍叠加安全区，避免被系统手势条压住 */
+    padding: 0 16px calc(15px + env(safe-area-inset-bottom));
   }
 
   .greeting {

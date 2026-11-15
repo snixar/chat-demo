@@ -956,13 +956,28 @@ const ADAPTERS: Record<string, Adapter> = {
   rikkahub: { search: rikkahubSearch },
 }
 
-/** 执行一次搜索；未实现的服务直接报错，让模型知道换路 */
+/** 搜索结果的硬上限：不论服务商返回多少条，给模型的永远不超过这个数 */
+export const MAX_SEARCH_RESULTS = 10
+
+/**
+ * 执行一次搜索；未实现的服务直接报错，让模型知道换路。
+ *
+ * 这里统一把条数夹到 MAX_SEARCH_RESULTS：各适配器内部的 count 参数只是建议，
+ * 有的服务会返回更多（豆包 global、DeepSeek 上限 50），必须在这一层兜住，
+ * 否则一次搜索就能把上下文塞满。
+ */
 export const runSearch = async (context: SearchContext): Promise<SearchOutcome> => {
   const adapter = ADAPTERS[context.config.serviceId]
   if (!adapter) {
     throw new Error(`不支持的搜索服务：${context.config.serviceId}`)
   }
-  return adapter.search(context)
+  const limit = Math.min(Math.max(context.resultSize, 1), MAX_SEARCH_RESULTS)
+  const outcome = await adapter.search({ ...context, resultSize: limit })
+  return {
+    ...outcome,
+    items: outcome.items.slice(0, MAX_SEARCH_RESULTS),
+    ...(outcome.images ? { images: outcome.images.slice(0, MAX_SEARCH_RESULTS) } : {}),
+  }
 }
 
 /** 该服务能否抓取正文 */

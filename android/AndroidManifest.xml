@@ -5,6 +5,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 语音输入：仅录音，不写入存储 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
+      WebView 内的 getUserMedia 录音要求这个普通权限同时存在。
+      缺它时 Chromium 会打印 “Requires MODIFY_AUDIO_SETTINGS and RECORD_AUDIO.
+      No audio device will be available for recording”，随后 getUserMedia 抛
+      NotReadableError。普通权限，装包即授予，无需运行时申请。
+    -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <uses-feature
         android:name="android.hardware.microphone"

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">DeepSeek Chat</string>
+    <string name="app_name">DeepSleep</string>
     <string name="choose_file">选择文件</string>
     <string name="no_file_picker">没有可用的文件选择器</string>
     <string name="no_app_to_open">没有可以打开该文件的应用</string>

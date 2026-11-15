@@ -8,7 +8,9 @@ import { useMcp } from '../../services/mcp/store.js'
  * 用户在发首条消息前就可能想先关掉某个服务器。这里临存这份选择，
  * 由 sendMessage 在创建会话时带进去。
  *
- * null 表示「未自定义」，即使用全部已启用的服务器。
+ * 语义是「记住用户上次的选择」：发完消息后**不清空**，因此下一个新对话
+ * 沿用同一份开关状态，而不是每开一个新对话又把所有服务器全部打开。
+ * 只有在首次使用（从未设置过）时才回退到「全部已启用」。
  */
 export const useNewChatMcp = create<{ serverIds: string[] | null }>(() => ({ serverIds: null }))
 
@@ -31,5 +33,15 @@ export const toggleNewChatServer = (serverId: string, enabled: boolean) => {
   })
 }
 
-/** 发送成功后清空，下个新对话从默认值开始 */
-export const resetNewChatMcp = () => useNewChatMcp.setState({ serverIds: null })
+/**
+ * 记住这次会话实际使用的服务器集合，供下一个新对话沿用。
+ *
+ * 之前发送后会调用 reset 把它清回 null，而 null 表示「全部已启用」，
+ * 于是每个新对话都会重新打开所有服务器——这就是「MCP 状态没保持」的原因。
+ */
+export const rememberNewChatServers = (serverIds: string[] | undefined) => {
+  // undefined 表示该会话没显式记录过选择，保持当前值不动
+  if (serverIds !== undefined) {
+    useNewChatMcp.setState({ serverIds })
+  }
+}
