@@ -110,6 +110,23 @@ public final class AssetServer extends WebViewClient {
         return bridge.openExternally(uri);
     }
 
+    @Override
+    public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+        // 原生桥的准入状态在主线程维护；桥方法运行在 JavaBridge 线程，
+        // 直接调用 webView.getUrl() 会抛 “WebView method called on wrong thread”。
+        bridge.setTrustedPage(isSiteUrl(url));
+    }
+
+    @Override
+    public void onPageFinished(WebView view, String url) {
+        bridge.setTrustedPage(isSiteUrl(url));
+    }
+
+    /** 是否为打包站点的页面 */
+    private static boolean isSiteUrl(String url) {
+        return url != null && url.startsWith("https://" + HOST + "/");
+    }
+
     private static WebResourceResponse notFound() {
         return new WebResourceResponse(
                 "text/plain", "utf-8", 404, "Not Found", null,

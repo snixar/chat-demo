@@ -28,6 +28,13 @@ public final class BlobBridge {
     private static final String TAG = "ChatDemoBridge";
     /** 单块 base64 解码后的上限，页面按此切分 */
     static final int CHUNK_BYTES = 512 * 1024;
+    /**
+     * 单个文件与所有未完成文件的写入上限。
+     * 会话归档与附件原件都远小于此；设上限是为了在页面被注入脚本时
+     * 不能无限往 cacheDir 写数据把设备存储占满。
+     */
+    private static final long MAX_FILE_BYTES = 512L * 1024 * 1024;
+    private static final long MAX_PENDING_BYTES = 1024L * 1024 * 1024;
 
     /** open：交给查看器打开；save：让用户选择保存位置 */
     public enum Mode { OPEN, SAVE }
@@ -38,6 +45,8 @@ public final class BlobBridge {
         final String mime;
         final Mode mode;
         FileOutputStream stream;
+        /** 已写入字节数，用于总量控制 */
+        long written;
 
         Pending(File file, String name, String mime, Mode mode) {
             this.file = file;
@@ -50,15 +59,40 @@ public final class BlobBridge {
     private final Activity activity;
     private final WebView webView;
     private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
+    /**
+     * 当前页面是否为打包站点。
+     * 只能在主线程更新（由 AssetServer 的页面回调写入），
+     * 桥方法在 JavaBridge 线程读取 —— 不能在这里调 WebView 的任何方法。
+     */
+    private volatile boolean trustedPage = false;
 
     BlobBridge(Activity activity, WebView webView) {
         this.activity = activity;
         this.webView = webView;
     }
 
+    /** 由 AssetServer 在页面导航时调用（主线程） */
+    void setTrustedPage(boolean trusted) {
+        this.trustedPage = trusted;
+    }
+
+    /** 只有打包站点自己的页面才能使用落盘、相机与 HTTP 转发接口 */
+    boolean isTrustedPage() {
+        return trustedPage;
+    }
+
+    private boolean isTrustedCaller() {
+        return trustedPage;
+    }
+
     /** 页面里下载会话归档时调用；返回 token，随后用 writeChunk / endFile 写入 */
     @JavascriptInterface
     public String beginFile(String name, String mime, boolean save) {
+        // 与 HttpBridge 一致：只有打包站点自己的页面才能落盘到本应用缓存
+        if (!isTrustedCaller()) {
+            Log.w(TAG, "beginFile rejected: untrusted page");
+            return "";
+        }
         String safeName = name == null || name.trim().isEmpty() ? "download" : name.trim();
         // 文件名只用于展示与保存建议，路径分隔符一律替换，避免写到缓存目录之外。
         safeName = safeName.replace('/', '_').replace('\\', '_');
@@ -87,14 +121,37 @@ public final class BlobBridge {
         if (entry == null || entry.stream == null) {
             return false;
         }
+        byte[] bytes;
         try {
-            entry.stream.write(Base64.decode(base64, Base64.DEFAULT));
-            return true;
-        } catch (IOException | IllegalArgumentException e) {
-            Log.e(TAG, "writeChunk failed", e);
+            bytes = Base64.decode(base64, Base64.DEFAULT);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "writeChunk failed", e);
             abort(token);
             return false;
         }
+        if (entry.written + bytes.length > MAX_FILE_BYTES || pendingBytes() + bytes.length > MAX_PENDING_BYTES) {
+            Log.w(TAG, "writeChunk rejected: exceeds size limit");
+            abort(token);
+            return false;
+        }
+        try {
+            entry.stream.write(bytes);
+            entry.written += bytes.length;
+            return true;
+        } catch (IOException e) {
+            Log.w(TAG, "writeChunk failed", e);
+            abort(token);
+            return false;
+        }
+    }
+
+    /** 当前所有未完成文件已写入的字节总数 */
+    private long pendingBytes() {
+        long total = 0;
+        for (Pending entry : pending.values()) {
+            total += entry.written;
+        }
+        return total;
     }
 
     @JavascriptInterface
@@ -229,24 +286,34 @@ public final class BlobBridge {
         if (!source.exists()) {
             return;
         }
-        try (FileOutputStream out = (FileOutputStream) activity.getContentResolver()
-                .openOutputStream(target); RandomAccessFile in = new RandomAccessFile(source, "r")) {
-            if (out == null) {
-                return;
+        boolean copied = false;
+        try {
+            // openOutputStream 返回的是任意 OutputStream，强转 FileOutputStream 会 ClassCastException；
+            // 目标 Uri 也可能因权限或 provider 问题抛 SecurityException。
+            try (java.io.OutputStream out = activity.getContentResolver().openOutputStream(target);
+                 RandomAccessFile in = new RandomAccessFile(source, "r")) {
+                if (out == null) {
+                    throw new IOException("content resolver returned no stream");
+                }
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, read);
+                }
+                out.flush();
             }
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = in.read(buffer)) > 0) {
-                out.write(buffer, 0, read);
-            }
-            out.flush();
+            copied = true;
             Toast.makeText(activity, R.string.saved, Toast.LENGTH_SHORT).show();
-        } catch (IOException e) {
+        } catch (IOException | SecurityException | IllegalArgumentException | ClassCastException e) {
             Log.e(TAG, "copyToUri failed", e);
             Toast.makeText(activity, R.string.save_failed, Toast.LENGTH_LONG).show();
+        } finally {
+            // 复制失败时保留临时文件，用户可以在原位置重新触发保存。
+            if (copied) {
+                //noinspection ResultOfMethodCallIgnored
+                source.delete();
+            }
         }
-        //noinspection ResultOfMethodCallIgnored
-        source.delete();
     }
 
     /** 外部链接交给系统浏览器 */

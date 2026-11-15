@@ -16,14 +16,21 @@ pnpm android          # 产物：android/build/chat-demo-<version>.apk
 pnpm android:debug    # 调试签名 + debuggable，用于 WebView 远程调试
 ```
 
-首次构建会在 `android/.keystore/` 生成签名库（密码默认 `chat-demo`）。**这个文件必须备份**：换签名后已安装的应用无法覆盖升级。也可以用环境变量指定：
+`release` 构建必须提供签名库口令，未设置 `KEYSTORE_PASSWORD` 时脚本直接失败，不会用默认口令生成签名库——签名库一旦以公开口令创建，任何拿到该文件的人都能签出被系统视为同一应用的升级包。首次构建会用该口令在 `android/.keystore/` 生成签名库。**这个文件与口令必须一起备份**：换签名后已安装的应用无法覆盖升级。
+
+```sh
+export KEYSTORE_PASSWORD='<自选口令>'
+pnpm android
+```
+
+其余环境变量：
 
 | 变量                  | 默认值                          |
 | --------------------- | ------------------------------- |
 | `ANDROID_SDK_ROOT`    | `~/Android/sdk`                 |
 | `BUILD_TOOLS_VERSION` | `36.0.0`                        |
 | `KEYSTORE`            | `android/.keystore/release.jks` |
-| `KEYSTORE_PASSWORD`   | `chat-demo`                     |
+| `KEYSTORE_PASSWORD`   | 无（release 必填）              |
 | `KEYSTORE_ALIAS`      | `chat-demo`                     |
 
 `build-tools 34` 自带的 D8 8.2.2 处理 enum 时会内部崩溃，因此脚本默认用 36。

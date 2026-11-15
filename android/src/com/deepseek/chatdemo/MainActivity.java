@@ -28,7 +28,6 @@ import android.widget.Toast;
  */
 public final class MainActivity extends Activity {
 
-    static final String EXTRA_BLOB_TOKEN = "com.deepseek.chatdemo.BLOB_SOURCE";
     /** 等待保存的临时文件路径；ACTION_CREATE_DOCUMENT 的结果里只带回目标 Uri */
     String pendingSavePath;
 
@@ -111,6 +110,17 @@ public final class MainActivity extends Activity {
         } else {
             webView.restoreState(savedInstanceState);
         }
+    }
+
+    /**
+     * 原生桥的准入判断：只有打包站点自己的页面才能调用转发与落盘接口。
+     *
+     * 状态由 AssetServer 在页面导航回调里维护（主线程），这里只读它的缓存值：
+     * 桥方法运行在 JavaBridge 线程，调用 webView.getUrl() 会直接抛
+     * “WebView method called on wrong thread”。
+     */
+    boolean isTrustedPage() {
+        return bridge != null && bridge.isTrustedPage();
     }
 
     /**

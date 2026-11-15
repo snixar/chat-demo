@@ -89,6 +89,8 @@ export class McpClient {
   /** 记录连接期间收到的协议版本，便于诊断 */
   private serverInfo: { name?: string; version?: string } = {}
   private closed = false
+  /** 后台读流因协议问题终止时记录原因，供等待 endpoint 的调用方立即失败 */
+  private streamFailure: McpError | null = null
 
   constructor(private readonly config: McpServerConfig) {}
 
@@ -280,13 +282,16 @@ export class McpClient {
     })
     const deadline = Date.now() + REQUEST_TIMEOUT
     while (!this.messageEndpoint && Date.now() < deadline) {
+      if (this.streamFailure) {
+        throw this.streamFailure
+      }
       if (merged.aborted) {
         throw new McpError('network', 'MCP SSE connection aborted')
       }
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
     if (!this.messageEndpoint) {
-      throw new McpError('timeout', 'MCP SSE endpoint event was not received')
+      throw this.streamFailure ?? new McpError('timeout', 'MCP SSE endpoint event was not received')
     }
   }
 
@@ -303,8 +308,26 @@ export class McpClient {
     const events = readSse(response.body)
     for await (const event of events) {
       if (event.event === 'endpoint') {
-        // 地址可能是相对路径，按原始 URL 解析
-        this.messageEndpoint = new URL(event.data.trim(), this.config.url).toString()
+        // 地址可能是相对路径，按原始 URL 解析。
+        // 必须与配置地址同源：后续 POST 会带上用户配置的 Authorization，
+        // 恶意或已被劫持的服务器不能借 endpoint 事件把凭据引到第三方域名。
+        let resolved: URL
+        try {
+          resolved = new URL(event.data.trim(), this.config.url)
+        } catch {
+          this.streamFailure = new McpError('protocol', 'MCP endpoint event is not a valid URL')
+          this.eventSource?.abort()
+          return
+        }
+        if (resolved.origin !== new URL(this.config.url).origin) {
+          this.streamFailure = new McpError(
+            'protocol',
+            'MCP endpoint event points to a different origin'
+          )
+          this.eventSource?.abort()
+          return
+        }
+        this.messageEndpoint = resolved.toString()
         continue
       }
       if (!event.data.trim()) {

@@ -122,8 +122,15 @@ if [[ $DEBUG -eq 1 ]]; then
   FINAL="$OUT_DIR/chat-demo-debug.apk"
 else
   KEYSTORE="${KEYSTORE:-$ANDROID_DIR/.keystore/release.jks}"
-  KS_PASS="${KEYSTORE_PASSWORD:-chat-demo}"
   KS_ALIAS="${KEYSTORE_ALIAS:-chat-demo}"
+  # release 密码必须由调用方提供：签名库一旦以公开的默认口令生成，
+  # 任何拿到该文件的人都能签出被系统视为同一应用的升级包。
+  if [[ -z "${KEYSTORE_PASSWORD:-}" ]]; then
+    echo "缺少 release 签名库密码：请设置 KEYSTORE_PASSWORD 环境变量。" >&2
+    echo "首次生成签名库时它同时作为新库的口令，之后必须与库文件一起保密备份。" >&2
+    exit 1
+  fi
+  KS_PASS="$KEYSTORE_PASSWORD"
   if [[ ! -f "$KEYSTORE" ]]; then
     echo "==> 未找到签名库，生成 $KEYSTORE"
     mkdir -p "$(dirname "$KEYSTORE")"

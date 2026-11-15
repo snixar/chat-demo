@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
 import { ApiError, streamMessage } from '../api/client.js'
-import type { ChatModel, CreateMessageRequest, MessageParam } from '../api/types.js'
+import type { ChatModel, CreateMessageRequest, CustomTool, MessageParam } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
@@ -949,7 +949,7 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
  * 具体打哪个搜索服务由 services/search/store 决定（用户选中的实例，缺省回退到
  * DeepSeek + 官方 Key）；这里只负责声明工具与把参数转成调用。
  */
-const registerLocalSearchTools = (search: boolean) => {
+const registerLocalSearchTools = (sessionId: string, search: boolean) => {
   const tools: {
     name: string
     description: string
@@ -999,7 +999,7 @@ const registerLocalSearchTools = (search: boolean) => {
       },
     })
   }
-  registerLocalTools(tools)
+  registerLocalTools(sessionId, tools)
 }
 
 /** 本次请求实际会用到的服务端 file_id */
@@ -1108,6 +1108,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
   const toolTranscript: MessageParam[] = []
   /** 本轮请求可用的 MCP 工具；为空时不声明客户端工具 */
   let toolList: ReturnType<typeof toCustomTools> = []
+  /** 本轮实际声明给模型的 MCP 工具名；执行阶段只允许调用这些 */
+  let declaredTools: ReadonlySet<string> = new Set()
 
   try {
     // 附件只需补齐一次：后续工具轮次复用同样的文件引用
@@ -1139,9 +1141,12 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     // 自定义模型没有服务端的搜索/抓取工具，改由客户端调 DeepSeek 的独立搜索 API
     const usesCustomSearch = target.kind === 'custom'
     if (usesCustomSearch) {
-      registerLocalSearchTools(target.kind === 'custom' ? (initial.search ?? false) : false)
+      registerLocalSearchTools(
+        sessionId,
+        target.kind === 'custom' ? (initial.search ?? false) : false
+      )
     } else {
-      clearLocalTools()
+      clearLocalTools(sessionId)
     }
 
     {
@@ -1151,8 +1156,9 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       // 自定义模型可选择不声明工具（部分端点不支持）；官方模型保持原样
       const mcpTools = target.kind === 'custom' && !target.model.supportsTools ? [] : tools
       toolList = toCustomTools(mcpTools)
+      declaredTools = new Set(toolList.map((tool) => tool.name))
     }
-    const localTools = localToolsDeclaration()
+    const localTools = localToolsDeclaration(sessionId)
     // 自定义提供商可按提供商开关回传历史思考；官方路径保持丢弃
     const keepHistoryThinking =
       target.kind === 'custom' && includeReasoningOf(target.provider)
@@ -1247,7 +1253,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
 
       const roundBlocks = reply.blocks.slice(roundStart)
       const roundReply = { ...reply, blocks: roundBlocks }
-      reply = await executeToolCalls(sessionId, reply, roundBlocks, controller.signal)
+      reply = await executeToolCalls(sessionId, reply, roundBlocks, controller.signal, declaredTools)
       flush()
       persist(sessionId)
       if (controller.signal.aborted) {
@@ -1308,6 +1314,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       ),
     }))
     persist(sessionId)
+    // 本会话的工具声明只在这一轮流式期间有效，收尾时释放。
+    clearLocalTools(sessionId)
   }
 }
 
@@ -1317,7 +1325,7 @@ type RequestEventsArgs = {
   initial: AssistantMessage
   messages: MessageParam[]
   toolList: ReturnType<typeof toCustomTools>
-  localTools: ReturnType<typeof localToolsDeclaration>
+  localTools: CustomTool[]
   controller: AbortController
 }
 
@@ -1427,7 +1435,8 @@ const executeToolCalls = async (
   sessionId: string,
   reply: AssistantMessage,
   roundBlocks: ReplyBlock[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  declared: ReadonlySet<string>
 ): Promise<AssistantMessage> => {
   const calls = roundBlocks.filter((block) => block.type === 'tool_use')
   const results: ReplyBlock[] = []
@@ -1439,7 +1448,7 @@ const executeToolCalls = async (
     let content: string
     let isError = false
     try {
-      content = await callTool(call.name, call.input, signal)
+      content = await callTool(sessionId, call.name, call.input, signal, declared)
     } catch (error) {
       isError = true
       content = error instanceof Error ? error.message : String(error)

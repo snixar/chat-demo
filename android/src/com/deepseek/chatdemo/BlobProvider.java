@@ -48,11 +48,6 @@ public final class BlobProvider extends ContentProvider {
         ENTRIES.put(token, new Entry(file, mime, name));
     }
 
-    /** 供系统相机写入：注册一个尚未存在的临时文件，走 openFile 的写模式 */
-    static void registerWritable(String token, File file, String mime, String name) {
-        ENTRIES.put(token, new Entry(file, mime, name));
-    }
-
     @Override
     public boolean onCreate() {
         return true;
@@ -71,7 +66,7 @@ public final class BlobProvider extends ContentProvider {
         if (entry == null) {
             throw new FileNotFoundException("Unknown blob: " + uri);
         }
-        // 相机写入时文件尚未创建；读模式要求文件已存在
+        // 写模式允许目标文件尚不存在；读模式要求文件已存在
         if (!entry.file.exists() && !"w".equals(mode) && !"rw".equals(mode) && !"rwt".equals(mode)) {
             throw new FileNotFoundException("Unknown blob: " + uri);
         }

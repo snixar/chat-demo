@@ -135,10 +135,20 @@ export const toCustomTools = (tools: McpTool[]): CustomTool[] =>
     input_schema: tool.inputSchema,
   }))
 
-/** 找到某工具所属的服务器 */
+/**
+ * 找到某工具所属的服务器。
+ *
+ * 必须在这里也校验「服务器已启用」与「工具未被停用」：clients 缓存里可能还留着
+ * 用户刚关掉的服务器或工具的连接，而声明阶段（getReadyTools / loadAllTools）已经把它们
+ * 过滤掉了。若执行阶段不校验，模型只要写对名字就能调用界面上已经停用的工具。
+ */
 const findServerForTool = (qualifiedName: string) => {
   const parsed = parseQualifiedToolName(qualifiedName)
   if (!parsed) {
+    return null
+  }
+  const server = enabledServers().find((item) => item.id === parsed.serverId)
+  if (!server || server.disabledTools?.includes(parsed.toolName)) {
     return null
   }
   const entry = clients.get(parsed.serverId)
@@ -159,39 +169,58 @@ type LocalTool = {
   run: (input: unknown, signal: AbortSignal) => Promise<string>
 }
 
-const localTools = new Map<string, LocalTool>()
+/**
+ * 本地工具按会话隔离存放。
+ *
+ * 多个会话可以同时生成（streaming 以会话为键），而工具集取决于该会话使用的模型
+ * 与搜索开关。若共用一份全局表，后开始的会话会清掉或覆盖先开始的那个，
+ * 表现为「明明声明了却调不到」或「调到了没声明的工具」。
+ */
+const localToolsBySession = new Map<string, Map<string, LocalTool>>()
 
-/** 注册一组本地工具；同名的会覆盖，便于按当前开关动态调整 */
-export const registerLocalTools = (tools: LocalTool[]) => {
-  localTools.clear()
-  for (const tool of tools) {
-    localTools.set(tool.name, tool)
-  }
+/** 注册一个会话的本地工具；同名覆盖，便于按当前开关动态调整 */
+export const registerLocalTools = (sessionId: string, tools: LocalTool[]) => {
+  localToolsBySession.set(sessionId, new Map(tools.map((tool) => [tool.name, tool])))
 }
 
-export const clearLocalTools = () => localTools.clear()
+export const clearLocalTools = (sessionId: string) => {
+  localToolsBySession.delete(sessionId)
+}
 
-/** 本地工具转成声明给模型的格式 */
-export const localToolsDeclaration = (): CustomTool[] =>
-  [...localTools.values()].map((tool) => ({
+/** 该会话的本地工具转成声明给模型的格式 */
+export const localToolsDeclaration = (sessionId: string): CustomTool[] =>
+  [...(localToolsBySession.get(sessionId)?.values() ?? [])].map((tool) => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.inputSchema,
   }))
 
 /**
- * 执行一个客户端工具：先查本地工具（搜索/抓取），再查 MCP 服务器。
+ * 执行一个客户端工具：先查本会话的本地工具（搜索/抓取），再查 MCP 服务器。
  * 返回文本结果；失败时抛错，由调用方包成 is_error 的 tool_result ——
  * 模型能读到错误信息并自行决定下一步，比整轮失败更有用。
+ *
+ * declared 是本轮实际声明给模型的 MCP 工具名。执行时必须落在集合内：
+ * 会话可能只启用了一部分服务器，或模型的工具声明被整体关闭，
+ * 此时模型仍可能凭名字构造出 tool_use，不能让它绕过声明直接执行。
  */
-export const callTool = async (qualifiedName: string, input: unknown, signal: AbortSignal) => {
-  const local = localTools.get(qualifiedName)
+export const callTool = async (
+  sessionId: string,
+  qualifiedName: string,
+  input: unknown,
+  signal: AbortSignal,
+  declared: ReadonlySet<string>
+) => {
+  const local = localToolsBySession.get(sessionId)?.get(qualifiedName)
   if (local) {
     return local.run(input, signal)
   }
+  if (!declared.has(qualifiedName)) {
+    throw new McpError('tool', `Tool was not declared for this request: ${qualifiedName}`)
+  }
   const target = findServerForTool(qualifiedName)
   if (!target) {
-    throw new McpError('tool', `Unknown or disconnected tool: ${qualifiedName}`)
+    throw new McpError('tool', `Unknown, disabled or disconnected tool: ${qualifiedName}`)
   }
   const entry = clients.get(target.serverId)
   if (!entry) {

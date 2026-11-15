@@ -4,6 +4,18 @@ const READ_CHUNK_BYTES = 256 * 1024
 // 控制每轮同步解压的工作量；输出交给调用方保存后才继续读取。
 const INFLATE_CHUNK_BYTES = 8 * 1024
 
+/**
+ * 解压总量上限，防 ZIP 炸弹。
+ *
+ * ZIP32 的 size 字段本身可以声称到 4 GiB，而 deflate 的压缩比可达 ~1000:1，
+ * 因此不能只靠条目声明的 size 做保证。导出的归档里图片是 STORE 存储、会话
+ * JSON 很小，1 GiB 对正常导出有极大余量，同时把最坏情况的内存与写入量限住。
+ */
+const MAX_TOTAL_UNCOMPRESSED = 1024 * 1024 * 1024
+
+/** 单个条目的解压上限：图片按 64 MB 的附件约定留余量，会话 JSON 远小于此 */
+const MAX_ENTRY_UNCOMPRESSED = 128 * 1024 * 1024
+
 /** ZIP 结构损坏或使用了不支持的特性 */
 export class ArchiveError extends Error {
   constructor() {
@@ -119,6 +131,8 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
   }
   const entries: Entry[] = []
   const paths = new Set<string>()
+  /** 目录里各条目声明大小的累计，先于解压前拦截超大归档。 */
+  let declaredTotal = 0
   let cursor = 0
   for (let index = 0; index < count; index++) {
     if (cursor + 46 > size) {
@@ -150,6 +164,11 @@ const readDirectory = async (file: File): Promise<{ entries: Entry[]; offset: nu
     ) {
       invalid()
     }
+    // 声明的大小先挡一次：明显超限的条目不必等到解压才发现。
+    if (entrySize > MAX_ENTRY_UNCOMPRESSED || declaredTotal + entrySize > MAX_TOTAL_UNCOMPRESSED) {
+      invalid()
+    }
+    declaredTotal += entrySize
     const name = await readBytes(file, offset + cursor + 46, nameLength)
     const path = decodePath(name, flags)
     // 目录和同名文件也不能互相覆盖。
@@ -240,6 +259,8 @@ export type ArchiveEntry = {
  */
 export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
   const directory = await readDirectory(file)
+  /** 实际解压出的字节总数，与目录声明值互为校验。 */
+  let inflatedTotal = 0
   for (const [index, entry] of directory.entries.entries()) {
     const boundary = directory.entries[index + 1]?.offset ?? directory.offset
     const start = await readEntryOffset(file, entry, boundary)
@@ -253,7 +274,12 @@ export async function* readArchive(file: File): AsyncGenerator<ArchiveEntry> {
       const pending: Uint8Array[] = []
       const append = (chunk: Uint8Array) => {
         written += chunk.length
-        if (written > entry.size) {
+        // 声明值可能被伪造（data descriptor 场景），这里按实际解压量再卡一次。
+        if (written > entry.size || written > MAX_ENTRY_UNCOMPRESSED) {
+          invalid()
+        }
+        inflatedTotal += chunk.length
+        if (inflatedTotal > MAX_TOTAL_UNCOMPRESSED) {
           invalid()
         }
         for (const byte of chunk) {

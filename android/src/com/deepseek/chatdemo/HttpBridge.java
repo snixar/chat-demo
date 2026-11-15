@@ -32,6 +32,11 @@ public final class HttpBridge {
     private static final int MAX_BODY = 8 * 1024 * 1024;
     private static final int CONNECT_TIMEOUT = 15_000;
     private static final int READ_TIMEOUT = 120_000;
+    /** 明文 http 放行的主机，与 res/xml/network_security_config.xml 一致 */
+    private static final java.util.Set<String> LOOPBACK_HOSTS =
+            new java.util.HashSet<>(java.util.Arrays.asList("localhost", "127.0.0.1", "10.0.2.2"));
+    /** 流式响应累计上限，避免长连接把内存推满 */
+    private static final int MAX_STREAM_CHARS = 16 * 1024 * 1024;
 
     private final MainActivity activity;
     /**
@@ -69,14 +74,27 @@ public final class HttpBridge {
         }
         final JSONObject args;
         final String requestId;
+        final String url;
         try {
             args = new JSONObject(argument);
             requestId = args.optString("requestId", "");
+            url = args.getString("url");
         } catch (JSONException e) {
             Log.w(TAG, "bad request json", e);
             return;
         }
         if (requestId.isEmpty()) {
+            return;
+        }
+        // 只有本方页面可以借这个桥访问任意外部地址，避免被注入的第三方框架滥用。
+        if (!isTrustedCaller()) {
+            Log.w(TAG, "rejected request from untrusted page");
+            deliverError(requestId, "untrusted caller");
+            return;
+        }
+        String rejection = rejectUrl(url);
+        if (rejection != null) {
+            deliverError(requestId, rejection);
             return;
         }
         if (args.optBoolean("stream", false)) {
@@ -103,6 +121,44 @@ public final class HttpBridge {
         if (active != null) {
             active.disconnect();
         }
+    }
+
+    /** 当前页面是否就是打包进来的静态站点；状态由 AssetServer 在主线程维护 */
+    private boolean isTrustedCaller() {
+        return activity.isTrustedPage();
+    }
+
+    /**
+     * 明确不做代理的地址。
+     *
+     * 这个桥绕过了 CORS 与同源限制，等于一个通用 SSRF 出口：协议只允许 http/https，
+     * 明文 http 仅限本地回环（与 network_security_config.xml 保持一致），
+     * file:/content:/ftp: 等一律拒绝。
+     */
+    private static String rejectUrl(String raw) {
+        URL url;
+        try {
+            url = new URL(raw);
+        } catch (Exception e) {
+            return "invalid url";
+        }
+        String scheme = url.getProtocol();
+        if (!"http".equals(scheme) && !"https".equals(scheme)) {
+            return "unsupported scheme: " + scheme;
+        }
+        String host = url.getHost();
+        if (host == null || host.isEmpty()) {
+            return "missing host";
+        }
+        if ("http".equals(scheme) && !LOOPBACK_HOSTS.contains(host)) {
+            return "cleartext http is only allowed for localhost";
+        }
+        return null;
+    }
+
+    private void deliverError(String requestId, String message) {
+        final String payload = errorJson(message);
+        activity.runOnUiThread(() -> activity.deliverHttpResult(requestId, payload));
     }
 
     /**
@@ -171,9 +227,14 @@ public final class HttpBridge {
                                  new java.io.InputStreamReader(stream, StandardCharsets.UTF_8)) {
                         char[] buffer = new char[8 * 1024];
                         int read;
+                        long total = 0;
                         while ((read = reader.read(buffer)) > 0) {
                             if (destroyed || !streams.containsKey(requestId)) {
                                 break;
+                            }
+                            total += read;
+                            if (total > MAX_STREAM_CHARS) {
+                                throw new IOException("stream exceeded " + MAX_STREAM_CHARS + " chars");
                             }
                             String chunk = new String(buffer, 0, read);
                             activity.runOnUiThread(
