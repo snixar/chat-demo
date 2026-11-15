@@ -1,4 +1,5 @@
 import { ApiError } from './client.js'
+import { nativeFetch } from '../http/nativeFetch.js'
 import { readServerSentEvents } from './sse.js'
 import type {
   AssistantBlockParam,
@@ -33,7 +34,13 @@ type OpenAIToolCall = {
 type OpenAIMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string | OpenAIContentPart[] }
-  | { role: 'assistant'; content: string | null; tool_calls?: OpenAIToolCall[] }
+  | {
+      role: 'assistant'
+      content: string | null
+      tool_calls?: OpenAIToolCall[]
+      /** 历史思考过程；多数兼容端点接受该字段，个别不接受时可关掉 */
+      reasoning_content?: string
+    }
   | { role: 'tool'; tool_call_id: string; content: string }
 
 type OpenAIRequest = {
@@ -71,14 +78,25 @@ const toUserContent = (blocks: { type: string; text?: string }[]) =>
 
 /**
  * 把内部的 assistant 内容块转成 OpenAI 的 assistant 消息。
- * tool_use → tool_calls；thinking 不回传（OpenAI 兼容端点普遍不接受）。
+ * tool_use → tool_calls；thinking → reasoning_content（由 includeReasoning 控制）。
+ *
+ * 回传思考过程能让服务端保持推理连贯，也让多轮工具调用更稳定；
+ * 但部分兼容端点不接受未知字段，因此做成可关闭。
  */
-const toAssistantMessage = (blocks: AssistantBlockParam[]): OpenAIMessage => {
+const toAssistantMessage = (
+  blocks: AssistantBlockParam[],
+  includeReasoning: boolean
+): OpenAIMessage => {
   const text: string[] = []
   const toolCalls: OpenAIToolCall[] = []
+  const reasoning: string[] = []
   for (const block of blocks) {
     if (block.type === 'text') {
       text.push(block.text)
+    } else if (block.type === 'thinking') {
+      if (includeReasoning && block.thinking.trim()) {
+        reasoning.push(block.thinking)
+      }
     } else if (block.type === 'tool_use') {
       toolCalls.push({
         id: block.id,
@@ -91,15 +109,17 @@ const toAssistantMessage = (blocks: AssistantBlockParam[]): OpenAIMessage => {
     }
   }
   const content = text.join('')
+  const reasoningText = reasoning.join('')
   return {
     role: 'assistant',
     content: content || null,
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+    ...(reasoningText ? { reasoning_content: reasoningText } : {}),
   }
 }
 
 /** 内部消息列表转 OpenAI messages；工具结果单独成 role:"tool" 消息 */
-const toMessages = (messages: MessageParam[]): OpenAIMessage[] => {
+const toMessages = (messages: MessageParam[], includeReasoning: boolean): OpenAIMessage[] => {
   const result: OpenAIMessage[] = []
   for (const message of messages) {
     if (message.role === 'latest_reminder') {
@@ -108,7 +128,7 @@ const toMessages = (messages: MessageParam[]): OpenAIMessage[] => {
       continue
     }
     if (message.role === 'assistant') {
-      result.push(toAssistantMessage(message.content))
+      result.push(toAssistantMessage(message.content, includeReasoning))
       continue
     }
     if (typeof message.content === 'string') {
@@ -141,13 +161,22 @@ const toMessages = (messages: MessageParam[]): OpenAIMessage[] => {
   return result
 }
 
+/** buildOpenAIRequest 的可选行为开关，对应提供商上的设置 */
+export type OpenAIRequestOptions = {
+  /** 把历史助手消息的思考作为 assistant.reasoning_content 回传 */
+  includeReasoning: boolean
+  /** 声明提供商自带的联网搜索（web_search_options） */
+  builtInSearch: boolean
+}
+
 /**
  * 构造 OpenAI 请求体。reasoningEffort 只在开启思考时传，固定 high。
  */
 export const buildOpenAIRequest = (
   body: CreateMessageRequest,
   model: string,
-  reasoningEffort: string | undefined
+  reasoningEffort: string | undefined,
+  options: OpenAIRequestOptions = { includeReasoning: true, builtInSearch: false }
 ): OpenAIRequest => {
   const tools = body.tools.flatMap((tool) => {
     // 服务端工具（deepseek_web_search / deepseek_read_url）在 OpenAI 兼容端点下由客户端实现，
@@ -170,7 +199,10 @@ export const buildOpenAIRequest = (
 
   return {
     model,
-    messages: [{ role: 'system', content: body.system }, ...toMessages(body.messages)],
+    messages: [
+      { role: 'system', content: body.system },
+      ...toMessages(body.messages, options.includeReasoning),
+    ],
     stream: true,
     ...(body.thinking.type === 'enabled'
       ? {
@@ -179,6 +211,7 @@ export const buildOpenAIRequest = (
           thinking: { type: 'enabled' as const },
         }
       : { thinking: { type: 'disabled' as const } }),
+    ...(options.builtInSearch ? { web_search_options: {} } : {}),
     ...(tools.length > 0 ? { tools } : {}),
   }
 }
@@ -239,16 +272,21 @@ export async function* streamOpenAIMessage(
 ): AsyncGenerator<MessageStreamEvent> {
   let response: Response
   try {
-    response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
+    // 走统一出口：APK 里由原生桥代发，避开第三方端点的 CORS 预检
+    response = await nativeFetch(
+      `${baseUrl.replace(/\/$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(body),
+        signal,
       },
-      body: JSON.stringify(body),
-      signal,
-    })
+      true
+    )
   } catch (error) {
     if (signal.aborted) {
       throw error

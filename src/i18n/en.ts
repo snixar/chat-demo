@@ -148,6 +148,32 @@ export const en = {
   modelPickerOfficial: 'DeepSeek',
   modelPickerNoProviders: 'No custom models yet. Add a provider in Settings.',
   providerSection: 'Provider',
+  searchServiceTitle: 'Search service',
+  searchServiceDescription: 'Which provider powers web search',
+  searchServiceEmpty: 'No search service added yet',
+  searchServiceAdd: 'Add search service',
+  searchServiceActiveHint: 'Active search service',
+  searchServiceActive: 'Using "{name}"',
+  searchServiceDefaultDeepSeek:
+    'No search service configured; DeepSeek search will be used with your official API key',
+  searchServiceDefaultDeepSeekShort: 'DeepSeek search',
+  searchServiceNone:
+    'No search service configured. Add a DeepSeek API key to enable web search',
+  searchServiceNotConfigured: 'Not configured',
+  searchServiceInUse: 'In use',
+  searchServiceName: 'Name',
+  searchServiceEnabled: 'Enabled',
+  searchServiceUseThis: 'Use as current search service',
+  searchServiceUseThisHint:
+    'When off, the first enabled service in the list is used; if none, DeepSeek is used',
+  searchServiceNoConfig: 'This service needs no configuration; add it and it works',
+  searchServiceKeyHint: 'Most services require an API key from their website',
+  searchPickerAuto: 'Auto',
+  searchPickerAutoSub: 'Uses the first enabled service; currently "{name}"',
+  searchPickerNoService: 'No search service available',
+  searchPickerEmpty: 'No search service added yet. Add one in Settings',
+  searchPickerHint:
+    'This only picks which service to use; add or configure services in Settings → Search service',
   providerListTitle: 'Model providers',
   providerAdd: 'Add provider',
   providerEmpty: 'No providers added yet',
@@ -159,6 +185,17 @@ export const en = {
   providerBaseUrl: 'Base URL',
   providerBaseUrlHint: 'e.g. https://api.example.com/v1',
   providerApiKey: 'API key',
+  providerEndpoint: 'API flavor',
+  providerEndpointHint:
+    'Chat Completions has the widest compatibility; Responses adds built-in search and reasoning summaries, but most proxies do not support it',
+  providerEndpointChat: 'Chat Completions',
+  providerEndpointResponses: 'Responses',
+  providerIncludeReasoning: 'Replay history reasoning',
+  providerIncludeReasoningHint:
+    'Send assistant reasoning with each turn to keep multi-turn reasoning coherent. Turn off if the endpoint rejects the field',
+  providerBuiltInSearch: 'Provider built-in search',
+  providerBuiltInSearchHint:
+    'Search runs on the provider side; the app stops declaring its own search tools. Only some endpoints honor it',
   providerModels: 'Models',
   providerFetchModels: 'Fetch model list',
   providerModelsLoading: 'Fetching…',
@@ -232,6 +269,9 @@ export const en = {
   apiKeyNotSet: 'Not set',
   apiKeyPageHint:
     'Your API key stays on this device and is used to call the DeepSeek API directly.',
+  apiKeyCurrent: 'Currently saved',
+  apiKeySheetHint:
+    'Add a DeepSeek API key to start chatting; it also powers web search.',
   settingsMcpTitle: 'MCP servers',
   settingsMcpEntryDescription: 'Connect external tools the model can call',
   settingsMcpEmptyValue: 'None',

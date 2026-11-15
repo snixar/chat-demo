@@ -34,7 +34,18 @@ public final class HttpBridge {
     private static final int READ_TIMEOUT = 120_000;
 
     private final MainActivity activity;
-    private final ExecutorService executor = Executors.newFixedThreadPool(3);
+    /**
+     * 普通请求（GET /models、MCP 的 JSON-RPC 调用等）：短任务，小池即可。
+     *
+     * 必须与流式请求分开：SSE 长连接会占住线程直到流结束，页面里几轮对话或几个
+     * MCP 连接就能把共用的池坐满，之后连一个 /models 都要排队等前面的流结束。
+     */
+    private final ExecutorService plainExecutor = Executors.newFixedThreadPool(4);
+    /**
+     * 流式请求（SSE 长连接）：每个连接占一个线程直到流结束，因此用缓存池，
+     * 空闲线程 60 秒回收；不设上限，避免长流把彼此和普通请求一起卡死。
+     */
+    private final ExecutorService streamExecutor = Executors.newCachedThreadPool();
     /** 进行中的流式请求，用于 cancel 与去重 */
     private final java.util.concurrent.ConcurrentHashMap<String, HttpURLConnection> streams =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -72,7 +83,7 @@ public final class HttpBridge {
             streamRequest(args, requestId);
             return;
         }
-        executor.execute(() -> {
+        plainExecutor.execute(() -> {
             String response;
             try {
                 response = perform(args);
@@ -99,7 +110,7 @@ public final class HttpBridge {
      * 结束时推 streamEnd。页面据此拼出与 fetch 相同的 Response 行为。
      */
     private void streamRequest(JSONObject args, String requestId) {
-        executor.execute(() -> {
+        streamExecutor.execute(() -> {
             HttpURLConnection connection = null;
             try {
                 String url = args.getString("url");
@@ -153,14 +164,18 @@ public final class HttpBridge {
                         ? connection.getErrorStream()
                         : connection.getInputStream();
                 if (stream != null) {
-                    try (InputStream in = stream) {
-                        byte[] buffer = new byte[8 * 1024];
+                    // 用 Reader 而不是按字节块 new String(...)：SSE 里的中文与 emoji 常被
+                    // 分片边界切开，逐块解码会把半个字符变成 U+FFFD。Reader 内部保留未完成
+                    // 的多字节序列，拼回完整字符后才交给页面。
+                    try (java.io.Reader reader =
+                                 new java.io.InputStreamReader(stream, StandardCharsets.UTF_8)) {
+                        char[] buffer = new char[8 * 1024];
                         int read;
-                        while ((read = in.read(buffer)) > 0) {
+                        while ((read = reader.read(buffer)) > 0) {
                             if (destroyed || !streams.containsKey(requestId)) {
                                 break;
                             }
-                            String chunk = new String(buffer, 0, read, StandardCharsets.UTF_8);
+                            String chunk = new String(buffer, 0, read);
                             activity.runOnUiThread(
                                     () -> activity.deliverHttpChunk(requestId, chunk));
                         }
@@ -293,6 +308,7 @@ public final class HttpBridge {
 
     void shutdown() {
         destroyed = true;
-        executor.shutdownNow();
+        plainExecutor.shutdownNow();
+        streamExecutor.shutdownNow();
     }
 }

@@ -1,4 +1,5 @@
 import { translate, type TranslationMessage } from '../../i18n/index.js'
+import { nativeFetch } from '../http/nativeFetch.js'
 import { readMessageEvent } from './parseEvent.js'
 import { readServerSentEvents } from './sse.js'
 import type {
@@ -66,10 +67,21 @@ const readErrorResponse = async (
   return new ApiError(kind, message, response.status)
 }
 
-export const request = async (url: string, init: RequestInit): Promise<Response> => {
+/**
+ * 发一次请求。
+ *
+ * 官方 API 允许本页面的源跨域，直接 fetch 即可。自定义提供商没有这个保证，
+ * 常见实现不返回 CORS 头，浏览器会拦下预检；APK 里要改由原生 HTTP 桥代发，
+ * 这里由调用方用 native 打开。streaming 为 true 时边到边读响应体（SSE 必须如此）。
+ */
+export const request = async (
+  url: string,
+  init: RequestInit,
+  { native = false, streaming = false }: { native?: boolean; streaming?: boolean } = {}
+): Promise<Response> => {
   let response: Response
   try {
-    response = await fetch(url, init)
+    response = native ? await nativeFetch(url, init, streaming) : await fetch(url, init)
   } catch (error) {
     if (init.signal?.aborted) {
       throw error
@@ -150,16 +162,21 @@ export async function* streamMessage(
   signal: AbortSignal,
   baseUrl: string = ANTHROPIC_BASE_URL
 ): AsyncGenerator<MessageStreamEvent> {
-  const response = await request(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers: {
-      ...anthropicHeaders(apiKey, hasFile(body)),
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
+  const response = await request(
+    `${baseUrl}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        ...anthropicHeaders(apiKey, hasFile(body)),
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({ ...body, stream: true }),
+      signal,
     },
-    body: JSON.stringify({ ...body, stream: true }),
-    signal,
-  })
+    // 传了 baseUrl 就说明是自定义提供商，走原生桥绕开 CORS；官方源自己允许跨域
+    { native: baseUrl !== ANTHROPIC_BASE_URL, streaming: true }
+  )
   const contentType = response.headers.get('Content-Type') ?? ''
   if (!response.body || !contentType.includes('text/event-stream')) {
     throw await readErrorResponse(response, 'protocol', '')

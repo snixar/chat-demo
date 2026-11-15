@@ -16,8 +16,17 @@ import {
   toCustomTools,
 } from '../mcp/tools.js'
 import { streamOpenAIMessage, buildOpenAIRequest } from '../api/openai.js'
-import { FETCH_TOOL_NAME, SEARCH_TOOL_NAME, fetchUrl, searchWeb } from '../api/deepseekTools.js'
-import { resolveModelTarget } from '../providers/store.js'
+import { buildResponsesRequest, streamResponsesMessage } from '../api/responses.js'
+import {
+  FETCH_TOOL_DESCRIPTION,
+  FETCH_TOOL_NAME,
+  SEARCH_QUERY_DESCRIPTION,
+  SEARCH_RESULT_SIZE,
+  SEARCH_TOOL_DESCRIPTION,
+  SEARCH_TOOL_NAME,
+} from '../api/searchTools.js'
+import { scrape as scrapeUrl, search as runWebSearch } from '../search/store.js'
+import { builtInSearchOf, includeReasoningOf, openaiEndpointOf, resolveModelTarget } from '../providers/store.js'
 import { CUSTOM_REASONING_EFFORT } from '../providers/types.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
@@ -29,6 +38,7 @@ import {
   prepareDraftMessage,
 } from './drafts.js'
 import { createLatestReminder } from './latestReminder.js'
+import { requestSessionTitle } from './title.js'
 import {
   applyEvent,
   canContinueReply,
@@ -75,8 +85,11 @@ const serverTools = (search: boolean): CreateMessageRequest['tools'] => {
   return tools
 }
 
-/** 允许自动补标题的请求；手动重命名后取消本轮标题写入，包含主动清空标题的情况。 */
-const titleRequests = new Set<AbortController>()
+/**
+ * 需要自动补标题的会话。进入集合的时机是「首轮对话开始」，成功后拉一次标题就移出，
+ * 因此整个会话只生成一次标题；手动重命名也会把它移出（用户已经定好了名字）。
+ */
+const titlePending = new Set<string>()
 
 type ChatState = {
   ready: boolean
@@ -479,10 +492,8 @@ export const renameSession = (id: string, title: string) => {
   if (get().importingHistory || deletingSessions.has(id)) {
     return
   }
-  const controller = getStreamController(id)
-  if (controller) {
-    titleRequests.delete(controller)
-  }
+  // 用户已手动命名，后续不再自动生成
+  titlePending.delete(id)
   if (getSession(id)) {
     updateSession(id, (session) => ({ ...session, title }))
     persist(id)
@@ -594,6 +605,8 @@ export const sendMessage = (targetSessionId: string | null) => {
     }
     sessionId = session.id
     touchSession(session.id)
+    // 新会话的首轮对话，成功后生成一次标题
+    titlePending.add(session.id)
     set((state) => ({
       sessions: [toSessionSummary(session), ...state.sessions],
       sessionCache: { ...state.sessionCache, [session.id]: session },
@@ -930,11 +943,12 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
 }
 
 /**
- * 注册客户端搜索/抓取工具。search 为 false 时只注册抓取（与官方模型一致，
- * 官方那边 read_url 也是始终声明的）。
+ * 注册客户端搜索/抓取工具。search 为 false 时只注册抓取。
+ *
+ * 具体打哪个搜索服务由 services/search/store 决定（用户选中的实例，缺省回退到
+ * DeepSeek + 官方 Key）；这里只负责声明工具与把参数转成调用。
  */
 const registerLocalSearchTools = (search: boolean) => {
-  const key = () => useSettings.getState().apiKey ?? ''
   const tools: {
     name: string
     description: string
@@ -943,8 +957,7 @@ const registerLocalSearchTools = (search: boolean) => {
   }[] = [
     {
       name: FETCH_TOOL_NAME,
-      description:
-        'Fetch and read the full text of a web page. Use when the user gives a URL or a search result needs details.',
+      description: FETCH_TOOL_DESCRIPTION,
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -958,18 +971,18 @@ const registerLocalSearchTools = (search: boolean) => {
         if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
           throw new Error('A valid http(s) url is required')
         }
-        return fetchUrl(key(), url, signal)
+        return scrapeUrl(url, signal)
       },
     },
   ]
   if (search) {
     tools.push({
       name: SEARCH_TOOL_NAME,
-      description: 'Search the web for current information. Returns titles, URLs and snippets.',
+      description: SEARCH_TOOL_DESCRIPTION,
       inputSchema: {
         type: 'object' as const,
         properties: {
-          query: { type: 'string', description: 'Search query' },
+          query: { type: 'string', description: SEARCH_QUERY_DESCRIPTION },
         },
         required: ['query'],
       },
@@ -981,7 +994,7 @@ const registerLocalSearchTools = (search: boolean) => {
         if (typeof query !== 'string' || !query.trim()) {
           throw new Error('A non-empty query is required')
         }
-        return searchWeb(key(), query, signal)
+        return runWebSearch(query, SEARCH_RESULT_SIZE, signal)
       },
     })
   }
@@ -1078,9 +1091,8 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
  */
 const streamReply = async (sessionId: string, initial: AssistantMessage, request: Request) => {
   const controller = new AbortController()
-  if (!getSession(sessionId)?.title) {
-    titleRequests.add(controller)
-  }
+  // 只有首轮对话（会话里还没有更早的回答）才需要生成标题
+  const generateTitle = titlePending.has(sessionId)
   set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
   let reply = initial
   let frame = 0
@@ -1140,6 +1152,9 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       toolList = toCustomTools(mcpTools)
     }
     const localTools = localToolsDeclaration()
+    // 自定义提供商可按提供商开关回传历史思考；官方路径保持丢弃
+    const keepHistoryThinking =
+      target.kind === 'custom' && includeReasoningOf(target.provider)
     controller.signal.throwIfAborted()
 
     for (let turn = 0; ; turn += 1) {
@@ -1148,7 +1163,8 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         prepared.question,
         turn === 0 ? prepared.prefix : undefined,
         initial.thinking ?? false,
-        latestReminder
+        latestReminder,
+        keepHistoryThinking
       )
       /** 本轮请求新增的块从已有块数开始，用于切出这一轮的 assistant 内容 */
       const roundStart = reply.blocks.length
@@ -1167,21 +1183,6 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           const blockIndexes = new Map<number, number>()
           for await (const event of events) {
             receivedContent ||= event.type === 'content_block_start'
-            if (
-              event.type === 'message_delta' &&
-              (event.delta.stop_reason === 'end_turn' ||
-                event.delta.stop_reason === 'max_tokens') &&
-              event.delta.title?.trim() &&
-              titleRequests.has(controller) &&
-              !controller.signal.aborted &&
-              !get().importingHistory
-            ) {
-              const title = event.delta.title.trim()
-              updateSession(sessionId, (session) =>
-                session.title ? session : { ...session, title }
-              )
-              titleRequests.delete(controller)
-            }
             reply = applyEvent(reply, event, Date.now(), blockIndexes)
             if (document.visibilityState === 'hidden') {
               flush()
@@ -1257,6 +1258,29 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       const resultBlocks = reply.blocks.slice(roundStart)
       toolTranscript.push(toAssistantParam(roundReply), ...toToolResultParams(resultBlocks))
     }
+
+    // 首轮对话成功后生成一次标题：用这一次对话实际使用的模型，
+    // 因此标题的语言与风格和正文一致。第二轮起不再触发。
+    if (generateTitle && reply.status === 'done' && !controller.signal.aborted) {
+      titlePending.delete(sessionId)
+      const firstText = request.question.content
+      if (firstText.trim()) {
+        void requestSessionTitle(target, firstText, controller.signal)
+          .then((title) => {
+            // 期间用户可能已手动改名或导入历史，这些情况都不覆盖
+            if (!title || get().importingHistory || controller.signal.aborted) {
+              return
+            }
+            updateSession(sessionId, (session) =>
+              session.title ? session : { ...session, title }
+            )
+            persist(sessionId)
+          })
+          .catch(() => {
+            // 标题只是装饰，失败不影响正文；下次新建会话再试
+          })
+      }
+    }
   } catch (error) {
     if (controller.signal.aborted) {
       reply = settleReply(reply, 'stopped', Date.now())
@@ -1274,7 +1298,6 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
       })
     }
   } finally {
-    titleRequests.delete(controller)
     streamFlushes.delete(sessionId)
     cancelAnimationFrame(frame)
     updateReply(sessionId, reply)
@@ -1323,7 +1346,6 @@ function buildRequestEvents({
         thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
         safety_check: SAFETY_CHECK,
         tools: [...serverTools(initial.search ?? false), ...toolList],
-        ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
       },
       controller.signal
     )
@@ -1353,16 +1375,44 @@ function buildRequestEvents({
     )
   }
 
+  const includeReasoning = includeReasoningOf(target.provider)
+  const builtInSearch = builtInSearchOf(target.provider)
+  // 提供商自带搜索由云端执行，再声明客户端的搜索工具只会让模型二选一。
+  // 这里只影响本次声明，不动注册表：其他轮次与其他会话仍在用。
+  const clientTools = builtInSearch ? [] : localTools
+
+  if (openaiEndpointOf(target.provider) === 'responses') {
+    // Responses API：系统提示走 instructions，思考是独立 reasoning item
+    const declaredTools = target.model.supportsTools ? [...toolList, ...clientTools] : []
+    return streamResponsesMessage(
+      target.provider.apiKey,
+      target.provider.baseUrl,
+      buildResponsesRequest({
+        model: target.model.modelId,
+        system: SYSTEM_PROMPT,
+        messages,
+        tools: declaredTools,
+        thinking: initial.thinking ?? false,
+        reasoningEffort: initial.thinking ? CUSTOM_REASONING_EFFORT : undefined,
+        includeReasoning,
+        builtInSearch,
+      }),
+      controller.signal
+    )
+  }
+
   return streamOpenAIMessage(
     target.provider.apiKey,
     target.provider.baseUrl,
     buildOpenAIRequest(
       {
         ...base,
+        tools: target.model.supportsTools ? [...toolList, ...clientTools] : clientTools,
         safety_check: SAFETY_CHECK,
       } as unknown as CreateMessageRequest,
       target.model.modelId,
-      initial.thinking ? CUSTOM_REASONING_EFFORT : undefined
+      initial.thinking ? CUSTOM_REASONING_EFFORT : undefined,
+      { includeReasoning, builtInSearch }
     ),
     controller.signal
   )

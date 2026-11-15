@@ -1,0 +1,81 @@
+/* API Key 编辑弹窗 */
+
+.keyBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 4px 8px;
+}
+
+/* 已保存的 Key：一行说明 + 掩码 */
+.keyCurrent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 999px;
+  background-color: var(--dsw-specific-selector);
+}
+
+.keyCurrentLabel {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.keyMask {
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: 1px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.keyHint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.keyInput {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  border: 1.5px solid var(--dsw-alias-border-l3);
+  /* 胶囊状输入框 */
+  border-radius: 999px;
+  outline: none;
+  background-color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  font-family: inherit;
+  -webkit-appearance: none;
+}
+
+.keyInput:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.keyInput::placeholder {
+  color: var(--dsw-alias-label-caption);
+}
+
+.keyError {
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.keySubmit {
+  width: 100%;
+}
+
+.keyFoot {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-caption);
+  text-align: center;
+}

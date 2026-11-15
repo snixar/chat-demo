@@ -9,6 +9,7 @@ import type {
   Table as TableNode,
 } from 'mdast'
 import { CitationLink } from '../search/CitationLink.js'
+import { WebCitationLink } from '../search/WebCitationLink.js'
 import { CodeBlock } from './CodeBlock.js'
 import { ImageAsLink, Link } from './Link.js'
 import { InlineMath, MathBlock } from './MathFormula.js'
@@ -139,6 +140,8 @@ const MarkdownPhrasingContentItem = memo(function MarkdownPhrasingContentItem({
       return <TextContent>{node.value}</TextContent>
     case 'citation':
       return <CitationLink source={node.source} />
+    case 'webCitation':
+      return <WebCitationLink url={node.url} domain={node.domain} />
     default:
       // 删除线、脚注、引用式链接已在解析时换成文本
       return null

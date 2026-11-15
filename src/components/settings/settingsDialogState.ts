@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useSettings } from '../../services/settings.js'
+import { openApiKeySheet } from './apiKeySheetState.js'
 
 /** 设置页的路由；root 是分组列表，mcpServer 是服务器详情 */
 export type SettingsRoute =
@@ -11,9 +12,14 @@ export type SettingsRoute =
   /** providerId 为 null 表示新建，保存后才真正落库 */
   | { name: 'providerDetail'; providerId: string | null }
   | { name: 'mcpServer'; serverId: string }
+  | { name: 'searchServices' }
+  | { name: 'searchServiceDetail'; serviceId: string }
 
 /** 可直达的二级页（不含 root 与需要参数的路由） */
-export type SettingsPageId = Exclude<SettingsRoute['name'], 'root' | 'mcpServer' | 'providerDetail'>
+export type SettingsPageId = Exclude<
+  SettingsRoute['name'],
+  'root' | 'mcpServer' | 'providerDetail' | 'searchServiceDetail'
+>
 
 /**
  * 设置页状态。栈放在 store 而不是组件里，因为原生返回键、侧边栏入口都要能控制它：
@@ -35,16 +41,27 @@ const isSameRoute = (a: SettingsRoute, b: SettingsRoute) => {
   if (a.name === 'providerDetail' && b.name === 'providerDetail') {
     return a.providerId === b.providerId
   }
+  if (a.name === 'searchServiceDetail' && b.name === 'searchServiceDetail') {
+    return a.serviceId === b.serviceId
+  }
   return true
 }
 
-/** 打开设置；page 为 null 时停在列表页 */
+/**
+ * 打开设置；page 为 null 时停在列表页。
+ *
+ * apiKey 已改成底部弹窗，不再是二级页面：这里打开设置后立刻弹出面板，
+ * 保持 `openSettings('apiKey')` 这个调用点语义不变。
+ */
 export const openSettings = (page: SettingsPageId | null = null) => {
   const stack: SettingsRoute[] = [{ name: 'root' }]
-  if (page) {
+  if (page && page !== 'apiKey') {
     stack.push({ name: page })
   }
   useSettingsDialog.setState({ open: true, stack })
+  if (page === 'apiKey') {
+    openApiKeySheet()
+  }
 }
 
 /** 打开某台提供商的详情；传 null 表示新建 */
@@ -65,6 +82,17 @@ export const openMcpServer = (serverId: string) =>
     stack: [
       ...state.stack.filter((route) => route.name === 'root'),
       { name: 'mcpServer', serverId },
+    ],
+  }))
+
+/** 打开某个搜索服务实例的详情 */
+export const openSearchService = (serviceId: string) =>
+  useSettingsDialog.setState((state) => ({
+    open: true,
+    stack: [
+      ...state.stack.filter((route) => route.name === 'root'),
+      { name: 'searchServices' },
+      { name: 'searchServiceDetail', serviceId },
     ],
   }))
 
@@ -96,7 +124,7 @@ export const popSettingsRoute = (): boolean => {
   return true
 }
 
-/** 没有 API Key 时打开设置并直达 Key 页面，返回是否已有 Key */
+/** 没有 API Key 时打开设置并弹出 Key 面板，返回是否已有 Key */
 export const ensureApiKey = () => {
   if (useSettings.getState().apiKey) {
     return true

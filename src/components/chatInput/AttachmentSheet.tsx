@@ -7,12 +7,14 @@ import { useChatStore } from '../../services/chat/store.js'
 import { resolveServerIds, useNewChatMcp } from './newChatMcp.js'
 import { McpServerPicker } from './McpServerPicker.js'
 import { ModelPicker, useCurrentModelLabel } from './ModelPicker.js'
+import { SearchPicker } from './SearchPicker.js'
+import { searchLabelFrom, useSearchServices } from '../../services/search/store.js'
 import styles from './AttachmentSheet.module.css'
 
 /**
  * 附件入口面板，布局对齐 rikkahub 的 FilesPicker：
- * 主页面是拍照 / 相册 / 文件三张卡片，下面一行「MCP 服务器」入口（带已启用数量角标），
- * 点进去是服务器选择子页面，返回键回主页面。
+ * 主页面是拍照 / 相册 / 文件三张卡片，下面依次是「模型」「搜索服务」「MCP 服务器」入口，
+ * 点进去是对应的选择子页面，返回键回主页面。
  */
 export const AttachmentSheet = ({
   open,
@@ -30,12 +32,35 @@ export const AttachmentSheet = ({
   sessionId: string | null
 }) => {
   const t = useTranslate()
-  const [page, setPage] = useState<'main' | 'model' | 'mcp'>('main')
+  const [page, setPage] = useState<'main' | 'model' | 'search' | 'mcp'>('main')
 
   // 关闭时回到主页面，否则下次打开会停在上次的子页面
   const close = () => {
     setPage('main')
     onClose()
+  }
+
+  if (page === 'search') {
+    return (
+      <BottomSheet
+        open={open}
+        title={t('searchServiceTitle')}
+        onClose={close}
+        padded
+        headerAction={
+          <button
+            type="button"
+            className={styles.backButton}
+            aria-label={t('back')}
+            onClick={() => setPage('main')}
+          >
+            <ArrowLeftIcon />
+          </button>
+        }
+      >
+        <SearchPicker onPicked={close} />
+      </BottomSheet>
+    )
   }
 
   if (page === 'model') {
@@ -101,6 +126,7 @@ export const AttachmentSheet = ({
         </button>
       </div>
       <ModelEntryRow onClick={() => setPage('model')} />
+      <SearchEntryRow onClick={() => setPage('search')} />
       <McpEntryRow sessionId={sessionId} onClick={() => setPage('mcp')} />
     </BottomSheet>
   )
@@ -117,6 +143,27 @@ const ModelEntryRow = ({ onClick }: { onClick: () => void }) => {
       </span>
       <span className={styles.entryLabel}>{t('modelPickerTitle')}</span>
       <span className={styles.entryValue}>{label}</span>
+      <span className={styles.entryChevron}>
+        <ChevronIcon />
+      </span>
+    </button>
+  )
+}
+
+/** 主面板的搜索服务入口：图标 + 名称 + 当前服务名 + 箭头 */
+const SearchEntryRow = ({ onClick }: { onClick: () => void }) => {
+  const t = useTranslate()
+  // 订阅列表与选中项，配置变化后这一行才能跟着刷新
+  const services = useSearchServices((state) => state.services)
+  const selectedId = useSearchServices((state) => state.selectedId)
+  const label = searchLabelFrom(services, selectedId)
+  return (
+    <button type="button" className={styles.entry} onClick={onClick}>
+      <span className={styles.entryIcon}>
+        <SearchIcon />
+      </span>
+      <span className={styles.entryLabel}>{t('searchServiceTitle')}</span>
+      <span className={styles.entryValue}>{label || t('searchServiceNotConfigured')}</span>
       <span className={styles.entryChevron}>
         <ChevronIcon />
       </span>
@@ -200,6 +247,13 @@ const ModelIcon = () => (
       strokeLinejoin="round"
     />
     <path d="M11 11l7.5-4.2M11 11v8M11 11L3.5 6.8" stroke="currentColor" strokeWidth="1.3" />
+  </svg>
+)
+
+const SearchIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden>
+    <circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M14.5 14.5L18 18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
   </svg>
 )
 

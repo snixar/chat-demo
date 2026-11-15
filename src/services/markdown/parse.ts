@@ -13,14 +13,37 @@ export interface CitationNode extends MdAstNode {
   source: Source
 }
 
+/**
+ * 客户端搜索用的引用：模型按约定写 `[citation,domain](url)`。
+ * 与上面的 [citation:N] 不同，它没有服务端来源列表，链接本身就是来源。
+ */
+export interface WebCitationNode extends MdAstNode {
+  type: 'webCitation'
+  url: string
+  domain: string
+}
+
 declare module 'mdast' {
   interface RootContentMap {
     citation: CitationNode
+    webCitation: WebCitationNode
   }
 
   interface PhrasingContentMap {
     citation: CitationNode
+    webCitation: WebCitationNode
   }
+}
+
+/** 取节点的纯文本，用于识别 [citation,domain] 这种链接文字 */
+const plainText = (node: Nodes): string => {
+  if (node.type === 'text') {
+    return node.value
+  }
+  if ('children' in node) {
+    return (node as Parent).children.map(plainText).join('')
+  }
+  return ''
 }
 
 const text = (value: string): Text => ({ type: 'text', value })
@@ -64,8 +87,21 @@ export function toMdAst(
       ;(node as Parent).children = node.children.flatMap(simplify) as RootContent[]
     }
     switch (node.type) {
-      case 'link':
+      case 'link': {
+        // 模型按搜索工具的约定写 [citation,domain](url)：换成紧凑角标，
+        // 否则用户会看到一长串 "citation,example.com" 的裸文字
+        const label = plainText(node)
+        if (label.startsWith('citation,')) {
+          return [
+            {
+              type: 'webCitation',
+              url: node.url,
+              domain: label.slice('citation,'.length).trim(),
+            },
+          ]
+        }
         return disableLink ? node.children : [node]
+      }
       case 'delete': {
         // 解析器保证首尾定界符等长
         const delimiter = raw(node).match(/^~+/)?.[0] ?? ''

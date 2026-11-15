@@ -1,0 +1,78 @@
+/* 搜索服务选择页：与模型选择页共用同一套行样式，这里只补页脚提示 */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:active {
+  background-color: var(--dsw-alias-interactive-bg-active);
+}
+
+@media (hover: hover) {
+  .item:hover {
+    background-color: var(--dsw-alias-interactive-bg-hover);
+  }
+}
+
+.itemText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.itemLabel {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.itemSub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--dsw-alias-brand-primary);
+}
+
+.hint {
+  padding: 8px 12px 4px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.hintBottom {
+  padding-top: 12px;
+}

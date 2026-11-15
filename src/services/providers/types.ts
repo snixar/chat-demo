@@ -3,6 +3,17 @@ import type { ChatModel } from '../api/types.js'
 /** 自定义提供商使用的协议；官方 DeepSeek 走 Anthropic 兼容接口，不在此列 */
 export type ProviderProtocol = 'anthropic' | 'openai'
 
+/**
+ * OpenAI 兼容端点内部的两种接口形态。
+ *
+ * - `chatCompletions`：POST {baseUrl}/chat/completions（绝大多数中转站）
+ * - `responses`：POST {baseUrl}/responses（OpenAI 官方新接口，支持内置搜索与推理摘要）
+ *
+ * 中转站对二者的支持并不一致，因此做成提供商级开关而不是自动探测：
+ * 探测失败会多发一次请求，而且错误被吞掉后很难排查。
+ */
+export type OpenAIEndpoint = 'chatCompletions' | 'responses'
+
 /** 一个自定义模型 */
 export type CustomModel = {
   id: string
@@ -23,6 +34,18 @@ export type CustomProvider = {
   apiKey: string
   models: CustomModel[]
   enabled: boolean
+  /** 仅 protocol === 'openai' 时生效；缺省按 chatCompletions 处理 */
+  openaiEndpoint?: OpenAIEndpoint
+  /**
+   * 多轮对话时把历史助手消息的思考过程回传给服务端。
+   * 缺省为 true：官方端点靠它维持推理连贯性；个别端点不接受该字段时手动关掉。
+   */
+  includeReasoning?: boolean
+  /**
+   * 使用提供商自带的联网搜索（Responses 的 web_search 工具、Chat Completions 的
+   * web_search_options）。多数中转站会静默忽略，按需开启。
+   */
+  builtInSearch?: boolean
 }
 
 /**

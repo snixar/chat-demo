@@ -6,6 +6,7 @@ import {
   type CustomModel,
   type CustomProvider,
   type ModelSelection,
+  type OpenAIEndpoint,
   type ResolvedTarget,
 } from './types.js'
 
@@ -34,6 +35,12 @@ const writeText = (key: string, value: string) => {
 
 const isProtocol = (value: unknown) => value === 'anthropic' || value === 'openai'
 
+/** 缺省视为 chatCompletions：老版本配置里没有这个字段 */
+const isEndpoint = (value: unknown) =>
+  value === undefined || value === 'chatCompletions' || value === 'responses'
+
+const isOptionalBoolean = (value: unknown) => value === undefined || typeof value === 'boolean'
+
 const isModel = (value: unknown): value is CustomModel => {
   if (typeof value !== 'object' || value === null) {
     return false
@@ -59,6 +66,9 @@ const isProvider = (value: unknown): value is CustomProvider => {
     typeof provider.baseUrl === 'string' &&
     typeof provider.apiKey === 'string' &&
     typeof provider.enabled === 'boolean' &&
+    isEndpoint(provider.openaiEndpoint) &&
+    isOptionalBoolean(provider.includeReasoning) &&
+    isOptionalBoolean(provider.builtInSearch) &&
     Array.isArray(provider.models) &&
     provider.models.every(isModel)
   )
@@ -191,3 +201,13 @@ export const isSelected = (providerId: string, modelId: string) => {
     selection.modelId === modelId
   )
 }
+
+/** OpenAI 兼容端点形态；Anthropic 协议下恒为 chatCompletions（无意义） */
+export const openaiEndpointOf = (provider: CustomProvider): OpenAIEndpoint =>
+  provider.protocol === 'openai' ? (provider.openaiEndpoint ?? 'chatCompletions') : 'chatCompletions'
+
+/** 是否回传历史思考；缺省开启 */
+export const includeReasoningOf = (provider: CustomProvider) => provider.includeReasoning !== false
+
+/** 是否使用提供商自带的联网搜索；缺省关闭 */
+export const builtInSearchOf = (provider: CustomProvider) => provider.builtInSearch === true

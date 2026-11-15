@@ -8,25 +8,7 @@ import { saveBlob } from '../../services/native.js'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
 import { showToast } from '../base/toastState.js'
-import { ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
 import { Group, Row, screenStyles as styles } from './SettingsScreen.js'
-
-/* ---------- API Key ---------- */
-
-export const ApiKeyPage = () => {
-  const t = useTranslate()
-  const editor = useApiKeyEditor()
-  return (
-    <>
-      <Group title={t('apiKeyLabel')}>
-        <div className={clsx(styles.row, styles.rowStatic)}>
-          <ApiKeyField editor={editor} />
-        </div>
-      </Group>
-      <p className={styles.hint}>{t('apiKeyPageHint')}</p>
-    </>
-  )
-}
 
 /* ---------- 数据：导入导出 / 删除 ---------- */
 

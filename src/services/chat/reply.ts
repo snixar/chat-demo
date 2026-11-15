@@ -251,7 +251,8 @@ const toUserParam = ({ content, files }: UserMessage): MessageParam => {
 
 /**
  * assistant 的内容块按历史与续写场景转换：
- * - 历史思考及其签名不回传；开启思考时续写只保留本轮非空白思考及其签名；
+ * - 历史思考及其签名默认不回传（官方 Anthropic 路径的规则，服务端会丢弃历史思考）；
+ *   自定义提供商开启「回传历史思考」时用 keepHistoryThinking 保留；
  * - 文本块去掉 citations（服务端忽略）。相邻文本直接拼接，被思考或工具隔开的文本用空行连接；
  *   省略历史思考后仍保留其前后正文的空行；
  * - 工具调用和结果只保留 kind 为 read_link 的块，其他历史服务器工具块不回传；
@@ -261,7 +262,8 @@ const toUserParam = ({ content, files }: UserMessage): MessageParam => {
 export const toAssistantParam = (
   { blocks }: AssistantMessage,
   prefix = false,
-  thinking = false
+  thinking = false,
+  keepHistoryThinking = false
 ): Extract<MessageParam, { role: 'assistant' }> => {
   const content: AssistantBlockParam[] = []
   // 成功阅读的网页靠签名恢复正文；缺少有效签名时，调用与结果都不回传。
@@ -297,7 +299,11 @@ export const toAssistantParam = (
     }
     text = null
     if (prefix && thinking && block.type === 'thinking') {
-      // 续写保留本轮思考，历史轮次的思考省略。
+      // 续写保留本轮思考，历史轮次的思考按 keepHistoryThinking 决定。
+      const { type, thinking, signature } = block
+      content.push({ type, thinking, signature: signature ?? '' })
+    } else if (keepHistoryThinking && block.type === 'thinking' && block.thinking.trim()) {
+      // 自定义提供商要求回传历史思考：作为普通思考块发出，签名照旧（可能为空）
       const { type, thinking, signature } = block
       content.push({ type, thinking, signature: signature ?? '' })
     } else if (
@@ -372,13 +378,17 @@ export const getContextRounds = (history: Message[]): [UserMessage, AssistantMes
 /**
  * 把会话转成请求的 messages：只保留「提问 + 有回答的回复」成对的轮次，最后接上本轮提问。
  * 失败或没有回答的轮次不进上下文。续写时末尾再带上本轮 assistant。
+ *
+ * keepHistoryThinking 为 true 时保留历史轮次的思考块：自定义提供商可以用它
+ * 维持多轮推理连贯（官方 Anthropic 路径保持默认的丢弃行为）。
  */
 export const toRequestMessages = (
   history: Message[],
   question: UserMessage,
   prefix?: AssistantMessage,
   thinking = prefix?.thinking ?? false,
-  latestReminder?: string
+  latestReminder?: string,
+  keepHistoryThinking = false
 ): MessageParam[] => {
   const messages: MessageParam[] = []
   let previousReminder: string | undefined
@@ -395,7 +405,7 @@ export const toRequestMessages = (
       continue
     }
     appendReminder(reply.latestReminder)
-    messages.push(toUserParam(user), toAssistantParam(reply))
+    messages.push(toUserParam(user), toAssistantParam(reply, false, false, keepHistoryThinking))
     // 工具结果必须紧跟对应的 assistant，否则模型无法把调用和结果配对
     const toolResults = toToolResultParam(reply.blocks)
     if (toolResults) {

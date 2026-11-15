@@ -6,15 +6,20 @@ import { useMcp } from '../../services/mcp/store.js'
 import {
   openMcpServer,
   openProviderDetail,
+  openSearchService,
   popSettingsRoute,
   pushSettingsRoute,
   useSettingsDialog,
   type SettingsRoute,
 } from './settingsDialogState.js'
-import { DataPage, ApiKeyPage } from './SettingsPages.js'
+import { DataPage } from './SettingsPages.js'
 import { McpPage, McpServerPage } from './McpPage.js'
 import { ProvidersPage, ProviderDetailPage } from './ProvidersPage.js'
+import { SearchServicesPage, SearchServiceDetailPage } from './SearchServicesPage.js'
+import { ApiKeySheet } from './ApiKeySheet.js'
+import { openApiKeySheet } from './apiKeySheetState.js'
 import { useProviders } from '../../services/providers/store.js'
+import { useSearchServices } from '../../services/search/store.js'
 import styles from './SettingsScreen.module.css'
 import { ChevronIcon, BackIcon, CloseIcon } from './settingsIcons.js'
 import { SettingPickerSheet, type SettingPicker } from './SettingPickers.js'
@@ -30,7 +35,11 @@ const routeTitles = {
   data: 'settingsDataTitle',
   mcp: 'settingsMcpTitle',
   providers: 'providerListTitle',
-} satisfies Record<Exclude<SettingsRoute['name'], 'mcpServer' | 'providerDetail'>, TranslationKey>
+  searchServices: 'searchServiceTitle',
+} satisfies Record<
+  Exclude<SettingsRoute['name'], 'mcpServer' | 'providerDetail' | 'searchServiceDetail'>,
+  TranslationKey
+>
 
 export const SettingsScreen = () => {
   const open = useSettingsDialog((state) => state.open)
@@ -41,6 +50,7 @@ export const SettingsScreen = () => {
   const servers = useMcp((state) => state.servers)
   // 所有 hook 必须在 return 之前调用，否则开关设置页时 hook 数量变化会导致 React 崩溃
   const providers = useProviders((state) => state.providers)
+  const searchServices = useSearchServices((state) => state.services)
 
   if (!open) {
     return null
@@ -51,13 +61,17 @@ export const SettingsScreen = () => {
       ? servers.find((item) => item.id === route.serverId)?.name
       : route.name === 'providerDetail'
         ? providers.find((item) => item.id === route.providerId)?.name
-        : undefined
+        : route.name === 'searchServiceDetail'
+          ? searchServices.find((item) => item.id === route.serviceId)?.name
+          : undefined
   const title =
     route.name === 'mcpServer'
       ? target || t('settingsMcpTitle')
       : route.name === 'providerDetail'
         ? target || t('providerListTitle')
-        : t(routeTitles[route.name])
+        : route.name === 'searchServiceDetail'
+          ? target || t('searchServiceTitle')
+          : t(routeTitles[route.name])
 
   return (
     <div className={styles.page} role="dialog" aria-modal="true" aria-label={title}>
@@ -74,7 +88,6 @@ export const SettingsScreen = () => {
       </header>
       <div className={styles.scroll}>
         {route.name === 'root' ? <RootPage /> : null}
-        {route.name === 'apiKey' ? <ApiKeyPage /> : null}
         {route.name === 'data' ? <DataPage /> : null}
         {route.name === 'mcp' ? <McpPage onOpenServer={openMcpServer} /> : null}
         {route.name === 'providers' ? <ProvidersPage onOpen={openProviderDetail} /> : null}
@@ -84,7 +97,15 @@ export const SettingsScreen = () => {
         {route.name === 'mcpServer' ? (
           <McpServerPage serverId={route.serverId} onDone={popSettingsRoute} />
         ) : null}
+        {route.name === 'searchServices' ? (
+          <SearchServicesPage onOpen={openSearchService} />
+        ) : null}
+        {route.name === 'searchServiceDetail' ? (
+          <SearchServiceDetailPage serviceId={route.serviceId} onDone={popSettingsRoute} />
+        ) : null}
       </div>
+      {/* API Key 走底部面板，不再占一个二级页面 */}
+      <ApiKeySheet />
     </div>
   )
 }
@@ -100,6 +121,17 @@ const RootPage = () => {
   const servers = useMcp((state) => state.servers)
   const [picker, setPicker] = useState<SettingPicker | null>(null)
   const modelLabel = useCurrentModelLabel()
+  // 搜索服务的展示值：配置了实例就用它的名字，否则说明会回退到 DeepSeek
+  const searchServices = useSearchServices((state) => state.services)
+  const selectedSearchId = useSearchServices((state) => state.selectedId)
+  const activeSearch =
+    searchServices.find((item) => item.enabled && item.id === selectedSearchId) ??
+    searchServices.find((item) => item.enabled)
+  const searchValue = activeSearch
+    ? activeSearch.name
+    : apiKey
+      ? t('searchServiceDefaultDeepSeekShort')
+      : t('searchServiceNotConfigured')
 
   const themeLabel = t(
     themePreference === 'light'
@@ -153,7 +185,7 @@ const RootPage = () => {
           label={t('apiKeyLabel')}
           description={t('settingsApiKeyHint')}
           value={apiKey ? '••••••••' : t('apiKeyNotSet')}
-          onClick={() => pushSettingsRoute({ name: 'apiKey' })}
+          onClick={openApiKeySheet}
         />
         <Row
           icon={<ModelIcon />}
@@ -161,6 +193,13 @@ const RootPage = () => {
           description={t('providerListTitle')}
           value={modelLabel}
           onClick={() => pushSettingsRoute({ name: 'providers' })}
+        />
+        <Row
+          icon={<SearchIcon />}
+          label={t('searchServiceTitle')}
+          description={t('searchServiceDescription')}
+          value={searchValue}
+          onClick={() => pushSettingsRoute({ name: 'searchServices' })}
         />
         <Row
           icon={<DatabaseIcon />}
@@ -320,6 +359,14 @@ const ModelIcon = () => (
     <path d="M10 10l6.4-3.6M10 10v6.4M10 10L3.6 6.4" stroke="currentColor" strokeWidth="1.2" />
   </svg>
 )
+
+const SearchIcon = () =>
+  ico(
+    <>
+      <circle cx="9" cy="9" r="5.5" {...stroke} />
+      <path d="M13.2 13.2L17 17" {...stroke} />
+    </>
+  )
 
 const PlugIcon = () =>
   ico(

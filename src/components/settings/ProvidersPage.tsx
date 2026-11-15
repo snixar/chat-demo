@@ -8,7 +8,11 @@ import {
   updateProvider,
   useProviders,
 } from '../../services/providers/store.js'
-import type { CustomProvider, ProviderProtocol } from '../../services/providers/types.js'
+import type {
+  CustomProvider,
+  OpenAIEndpoint,
+  ProviderProtocol,
+} from '../../services/providers/types.js'
 import { fetchProviderModels, type RemoteModel } from '../../services/providers/listModels.js'
 import { BottomSheet } from '../base/BottomSheet.js'
 import { screenStyles as styles } from './SettingsScreen.js'
@@ -56,6 +60,9 @@ export const ProvidersPage = ({ onOpen }: { onOpen: (id: string | null) => void 
                       : 'providerProtocolAnthropic'
                   )}
                 </span>
+                {provider.protocol === 'openai' && provider.openaiEndpoint === 'responses' ? (
+                  <span className={styles.tag}>{t('providerEndpointResponses')}</span>
+                ) : null}
                 <span className={styles.serverUrl}>
                   {t('providerModelCount', { count: provider.models.length })}
                 </span>
@@ -90,6 +97,11 @@ export const ProviderDetailPage = ({
   const [protocol, setProtocol] = useState<ProviderProtocol>(provider?.protocol ?? 'openai')
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState(provider?.apiKey ?? '')
+  const [endpoint, setEndpoint] = useState<OpenAIEndpoint>(
+    provider?.openaiEndpoint ?? 'chatCompletions'
+  )
+  const [includeReasoning, setIncludeReasoning] = useState(provider?.includeReasoning !== false)
+  const [builtInSearch, setBuiltInSearch] = useState(provider?.builtInSearch === true)
   const [error, setError] = useState<string | null>(null)
   /** 新建模式下，保存后才有真实 id */
   const [createdId, setCreatedId] = useState<string | null>(providerId)
@@ -123,6 +135,9 @@ export const ProviderDetailPage = ({
         apiKey: apiKey.trim(),
         models: draftModels,
         enabled: true,
+        openaiEndpoint: endpoint,
+        includeReasoning,
+        builtInSearch,
       })
       setCreatedId(created.id)
     } else {
@@ -131,6 +146,9 @@ export const ProviderDetailPage = ({
         protocol,
         baseUrl: url,
         apiKey: apiKey.trim(),
+        openaiEndpoint: endpoint,
+        includeReasoning,
+        builtInSearch,
       })
     }
     setError(null)
@@ -271,6 +289,69 @@ export const ProviderDetailPage = ({
           onChange={(event) => setApiKey(event.target.value)}
         />
       </div>
+
+      {/* 以下三项只对 OpenAI 兼容端点有意义；Anthropic 兼容没有对应概念 */}
+      {protocol === 'openai' ? (
+        <>
+          <div className={styles.fieldBlock}>
+            <div className={styles.fieldTitle}>{t('providerEndpoint')}</div>
+            <div className={styles.fieldHint}>{t('providerEndpointHint')}</div>
+            <div className={styles.segmented}>
+              <button
+                type="button"
+                className={clsx(
+                  styles.segment,
+                  endpoint === 'chatCompletions' && styles.segmentSelected
+                )}
+                onClick={() => setEndpoint('chatCompletions')}
+              >
+                {t('providerEndpointChat')}
+              </button>
+              <button
+                type="button"
+                className={clsx(styles.segment, endpoint === 'responses' && styles.segmentSelected)}
+                onClick={() => setEndpoint('responses')}
+              >
+                {t('providerEndpointResponses')}
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.fieldBlock}>
+            <div className={styles.toolHead}>
+              <span className={styles.fieldTitle} style={{ flex: 1 }}>
+                {t('providerIncludeReasoning')}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={includeReasoning}
+                aria-label={t('providerIncludeReasoning')}
+                className={clsx(styles.switch, includeReasoning && styles.switchOn)}
+                onClick={() => setIncludeReasoning((value) => !value)}
+              />
+            </div>
+            <div className={styles.fieldHint}>{t('providerIncludeReasoningHint')}</div>
+          </div>
+
+          <div className={styles.fieldBlock}>
+            <div className={styles.toolHead}>
+              <span className={styles.fieldTitle} style={{ flex: 1 }}>
+                {t('providerBuiltInSearch')}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={builtInSearch}
+                aria-label={t('providerBuiltInSearch')}
+                className={clsx(styles.switch, builtInSearch && styles.switchOn)}
+                onClick={() => setBuiltInSearch((value) => !value)}
+              />
+            </div>
+            <div className={styles.fieldHint}>{t('providerBuiltInSearchHint')}</div>
+          </div>
+        </>
+      ) : null}
 
       <div className={styles.fieldBlock}>
         <div className={styles.fieldTitle}>{t('providerModels')}</div>
